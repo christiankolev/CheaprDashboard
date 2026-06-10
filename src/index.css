@@ -1,3 +1,15 @@
+@import '../WEB/css/outfit.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #E8A838;
+    color: #222222;
+    font-family: 'Outfit-Variable', 'Outfit-Bold', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
