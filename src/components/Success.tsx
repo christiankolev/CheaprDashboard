@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import LeftyLogo from '../Leftylogo.svg'
+import CheaprLogo from '../CheaprLogo.svg'
 import { OUTLINE_DARK } from './StepperInput'
 
 interface SuccessProps {
@@ -70,7 +70,7 @@ export default function Success({ generatedPost, onNeuesAngebot }: SuccessProps)
       </div>
 
       <div className="flex justify-center pb-3">
-        <img src={LeftyLogo} alt="Lefty" className="h-7 w-auto opacity-30" />
+        <img src={CheaprLogo} alt="Cheapr" className="h-7 w-auto opacity-30" />
       </div>
     </div>
   )

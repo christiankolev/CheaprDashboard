@@ -1,4 +1,4 @@
-import LeftyLogo from '../Leftylogo.svg'
+import CheaprLogo from '../CheaprLogo.svg'
 
 export type AngebotType = 'box' | 'item'
 
@@ -93,7 +93,7 @@ export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode
       </div>
 
       <div className="mt-10 flex justify-center">
-        <img src={LeftyLogo} alt="Lefty" className="h-7 w-auto opacity-30" />
+        <img src={CheaprLogo} alt="Cheapr" className="h-7 w-auto opacity-30" />
       </div>
     </div>
   )
