@@ -53,7 +53,7 @@ export default function Success({ generatedPost, onNeuesAngebot }: SuccessProps)
           type="button"
           onClick={handleCopy}
           style={OUTLINE_DARK}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#E8A838] active:scale-[0.98]"
+          className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#F5A200] active:scale-[0.98]"
         >
           {copied ? '✓ Kopiert!' : 'Kopieren'}
         </button>

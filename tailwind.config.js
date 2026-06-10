@@ -5,9 +5,9 @@ export default {
     extend: {
       colors: {
         cheapr: {
-          yellow: '#E8A838',
+          yellow: '#F5A200',
           dark: '#222222',
-          page: '#E8A838',
+          page: '#F5A200',
         },
       },
       fontFamily: {

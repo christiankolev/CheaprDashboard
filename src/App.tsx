@@ -7,8 +7,8 @@ function MapPinIcon() {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width="14"
-      height="14"
+      width="13"
+      height="13"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -25,24 +25,28 @@ function MapPinIcon() {
 
 function HomePage() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#E8A838' }}>
+    <div className="min-h-screen" style={{ backgroundColor: '#F5A200' }}>
       {/* Header */}
       <header className="flex justify-center pt-10 pb-6 px-4">
         <img src={logo} alt="Cheapr" className="h-12 w-auto" />
       </header>
 
       {/* Subtitle */}
-      <p className="text-center text-[#232323] font-semibold text-lg mb-8 px-4">
+      <p className="text-center text-[#232323] font-semibold text-lg mb-6 px-4">
         Wähle deinen Betrieb
       </p>
 
-      {/* Cards */}
-      <main className="px-4 pb-12 max-w-md mx-auto space-y-4">
+      {/* Horizontal scrollable card row */}
+      <div className="flex overflow-x-auto gap-4 px-5 pb-12 snap-x snap-mandatory scrollbar-hide">
         {Object.entries(betriebe).map(([id, betrieb]) => (
-          <Link key={id} to={`/betrieb/${id}`} className="block group">
-            <div className="bg-white rounded-2xl overflow-hidden shadow-md transition-transform duration-200 group-active:scale-[0.98]">
+          <Link
+            key={id}
+            to={`/betrieb/${id}`}
+            className="snap-start shrink-0 w-[240px] block group"
+          >
+            <div className="bg-white rounded-2xl overflow-hidden shadow-md transition-transform duration-200 group-active:scale-[0.97]">
               {/* Business image */}
-              <div className="relative h-44 w-full overflow-hidden">
+              <div className="h-40 w-full overflow-hidden">
                 <img
                   src={betrieb.bild}
                   alt={betrieb.name}
@@ -51,27 +55,29 @@ function HomePage() {
               </div>
 
               {/* Info section */}
-              <div className="px-4 py-3">
+              <div className="px-3 py-3">
                 {/* Business name */}
-                <p className="text-[#232323] font-bold text-xl leading-tight mb-1">
+                <p className="text-[#232323] font-bold text-base leading-tight mb-1">
                   {betrieb.name}
                 </p>
 
                 {/* Address with pin icon */}
-                <div className="flex items-center gap-1.5 text-gray-500 text-sm mb-2">
+                <div className="flex items-start gap-1 text-gray-500 text-xs mb-2 leading-snug">
                   <MapPinIcon />
                   <span>{betrieb.adresse}</span>
                 </div>
 
                 {/* Category badge */}
-                <span className="inline-block bg-[#E8A838]/20 text-[#a07010] text-xs font-semibold px-3 py-1 rounded-full">
+                <span className="inline-block bg-[#F5A200]/20 text-[#a06800] text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
                   {betrieb.kategorie}
                 </span>
               </div>
             </div>
           </Link>
         ))}
-      </main>
+        {/* trailing spacer so last card doesn't sit at edge */}
+        <div className="shrink-0 w-1" />
+      </div>
     </div>
   )
 }

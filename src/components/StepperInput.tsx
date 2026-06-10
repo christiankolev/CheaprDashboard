@@ -16,7 +16,7 @@ function formatDecimal(num: number): string {
   return num.toFixed(2).replace(/\.?0+$/, '').replace('.', ',')
 }
 
-const DARK_BOX = { backgroundColor: '#222222', color: '#E8A838' } as const
+const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
 export const OUTLINE_DARK = { border: '2px solid #222222', color: '#222222', backgroundColor: 'transparent' } as const
 
 const BTN_CLS =
@@ -46,7 +46,7 @@ export default function StepperInput({
       <div className="relative flex-1">
         <span
           className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black"
-          style={{ color: '#E8A838' }}
+          style={{ color: '#F5A200' }}
         >
           {suffix}
         </span>

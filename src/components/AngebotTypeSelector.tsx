@@ -6,6 +6,7 @@ interface AngebotTypeSelectorProps {
   onSelect: (type: AngebotType) => void
   betriebName?: string
   betriebCode?: string
+  betriebBild?: string
 }
 
 function TypeCard({
@@ -23,7 +24,7 @@ function TypeCard({
     <button
       type="button"
       onClick={onClick}
-      style={{ backgroundColor: '#222222', color: '#E8A838' }}
+      style={{ backgroundColor: '#222222', color: '#F5A200' }}
       className="flex h-[175px] w-full flex-col justify-between rounded-3xl p-5 text-left shadow-lg transition-all hover:opacity-90 active:scale-[0.97]"
     >
       <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">
@@ -41,7 +42,7 @@ function TypeCard({
   )
 }
 
-export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode }: AngebotTypeSelectorProps) {
+export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode, betriebBild }: AngebotTypeSelectorProps) {
   return (
     <div className="flex min-h-dvh flex-col bg-cheapr-page px-5 py-6">
 
@@ -49,9 +50,18 @@ export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode
         <div />
         {betriebCode && betriebName && (
           <div
-            style={{ backgroundColor: '#222222', color: '#E8A838' }}
-            className="rounded-full px-3 py-1"
+            style={{ backgroundColor: '#222222', color: '#F5A200' }}
+            className="flex items-center gap-2 rounded-full py-1 pl-1 pr-3"
           >
+            {betriebBild ? (
+              <img
+                src={betriebBild}
+                alt={betriebName}
+                className="h-6 w-6 rounded-full object-cover shrink-0"
+              />
+            ) : (
+              <div className="h-6 w-6 rounded-full bg-white/10 shrink-0" />
+            )}
             <span className="text-[11px] font-bold">{betriebCode} · {betriebName}</span>
           </div>
         )}

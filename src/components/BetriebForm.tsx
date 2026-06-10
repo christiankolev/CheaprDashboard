@@ -43,7 +43,7 @@ function boxTotalPrice(items: BoxItem[]): number {
   return items.reduce((sum, i) => sum + i.price * i.count, 0)
 }
 
-const DARK_BOX = { backgroundColor: '#222222', color: '#E8A838' } as const
+const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
 
 const INPUT_CLS =
   'w-full rounded-2xl px-4 py-4 text-lg font-bold placeholder:font-medium placeholder:opacity-40 focus:outline-none'
@@ -166,6 +166,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         onSelect={setAngebotType}
         betriebCode={betrieb.code}
         betriebName={betrieb.name}
+        betriebBild={betrieb.bild}
       />
     )
   }
@@ -329,7 +330,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
             type="button"
             onClick={() => { setError(null); setBoxStep('add-item') }}
             style={OUTLINE_DARK}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#E8A838] active:scale-[0.98]"
+            className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#F5A200] active:scale-[0.98]"
           >
             <span className="text-lg leading-none">+</span>
             Neues Item

@@ -66,7 +66,7 @@ export default function WizardShell({
         )}
 
         {contextBadge && (
-          <div style={{ backgroundColor: '#222222', color: '#E8A838' }} className="rounded-full px-3 py-1">
+          <div style={{ backgroundColor: '#222222', color: '#F5A200' }} className="rounded-full px-3 py-1">
             <span className="text-[11px] font-bold">{contextBadge}</span>
           </div>
         )}
@@ -105,7 +105,7 @@ export default function WizardShell({
               type="button"
               onClick={onNext}
               disabled={nextDisabled}
-              style={{ backgroundColor: '#222222', color: '#E8A838' }}
+              style={{ backgroundColor: '#222222', color: '#F5A200' }}
               className="flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-25"
             >
               {nextLabel}
