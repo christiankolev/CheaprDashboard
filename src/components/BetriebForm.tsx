@@ -171,7 +171,11 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     )
   }
 
-  const badge = `${angebotType === 'item' ? 'Item' : 'Box'} · ${betrieb.code}`
+  const betriebBadge = {
+    betriebCode: betrieb.code,
+    betriebName: betrieb.name,
+    betriebBild: betrieb.bild,
+  }
 
   const errorBanner = error ? (
     <div className="mb-4 rounded-xl bg-red-500/20 px-4 py-2.5 text-center text-xs font-bold text-red-300">
@@ -195,7 +199,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
     if (itemStep === 'name') return (
       <WizardShell
-        contextBadge={badge}
+        {...betriebBadge}
         stepCount={`${cur} / ${ITEM_TOTAL}`}
         stepName="Name"
         currentStep={cur}
@@ -222,7 +226,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
     if (itemStep === 'price') return (
       <WizardShell
-        contextBadge={badge}
+        {...betriebBadge}
         stepCount={`${cur} / ${ITEM_TOTAL}`}
         stepName="Preis"
         currentStep={cur}
@@ -246,7 +250,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
     if (itemStep === 'photo') return (
       <WizardShell
-        contextBadge={badge}
+        {...betriebBadge}
         stepCount={`${cur} / ${ITEM_TOTAL}`}
         stepName="Foto"
         currentStep={cur}
@@ -268,7 +272,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
     if (itemStep === 'time') return (
       <WizardShell
-        contextBadge={badge}
+        {...betriebBadge}
         stepCount={`${cur} / ${ITEM_TOTAL}`}
         stepName="Abholzeit"
         currentStep={cur}
@@ -290,7 +294,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
     return (
       <WizardShell
-        contextBadge={badge}
+        {...betriebBadge}
         stepCount={`${cur} / ${ITEM_TOTAL}`}
         stepName="Anzahl"
         currentStep={cur}
@@ -318,7 +322,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     const total = boxTotalPrice(boxItems)
     return (
       <WizardShell
-        contextBadge={badge}
+        {...betriebBadge}
         title="Deine Box"
         hint={boxItems.length > 0 ? `${boxItems.length} Item${boxItems.length > 1 ? 's' : ''} · Gesamt ${formatPrice(total)} €` : 'Füge Items mit dem Button unten hinzu'}
         onBack={() => setAngebotType(null)}
@@ -382,7 +386,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
   if (boxStep === 'add-item') return (
     <WizardShell
-      contextBadge={badge}
+      {...betriebBadge}
       title="Was kommt rein?"
       onBack={() => { setError(null); setDraftName(''); setDraftPrice(''); setDraftCount(1); setBoxStep('overview') }}
       onNext={addBoxItem}
@@ -414,7 +418,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
   if (boxStep === 'photo') return (
     <WizardShell
-      contextBadge={badge}
+      {...betriebBadge}
       stepCount={`${bCur} / ${BOX_TOTAL}`}
       stepName="Foto"
       currentStep={bCur}
@@ -436,7 +440,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
   if (boxStep === 'time') return (
     <WizardShell
-      contextBadge={badge}
+      {...betriebBadge}
       stepCount={`${bCur} / ${BOX_TOTAL}`}
       stepName="Abholzeit"
       currentStep={bCur}
@@ -458,7 +462,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
 
   return (
     <WizardShell
-      contextBadge={badge}
+      {...betriebBadge}
       stepCount={`${bCur} / ${BOX_TOTAL}`}
       stepName="Anzahl"
       currentStep={bCur}

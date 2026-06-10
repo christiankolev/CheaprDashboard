@@ -1,4 +1,5 @@
 import CheaprLogo from '../CheaprLogo.svg'
+import BetriebBadge from './BetriebBadge'
 
 export type AngebotType = 'box' | 'item'
 
@@ -44,26 +45,16 @@ function TypeCard({
 
 export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode, betriebBild }: AngebotTypeSelectorProps) {
   return (
-    <div className="flex min-h-dvh flex-col bg-cheapr-page px-5 py-6">
+    <div className="flex min-h-dvh flex-col bg-[#F5A200] px-5 py-6">
 
       <div className="flex items-center justify-between pb-10 pt-2">
         <div />
         {betriebCode && betriebName && (
-          <div
-            style={{ backgroundColor: '#222222', color: '#F5A200' }}
-            className="flex items-center gap-2 rounded-full py-1 pl-1 pr-3"
-          >
-            {betriebBild ? (
-              <img
-                src={betriebBild}
-                alt={betriebName}
-                className="h-6 w-6 rounded-full object-cover shrink-0"
-              />
-            ) : (
-              <div className="h-6 w-6 rounded-full bg-white/10 shrink-0" />
-            )}
-            <span className="text-[11px] font-bold">{betriebCode} · {betriebName}</span>
-          </div>
+          <BetriebBadge
+            label={`${betriebCode} · ${betriebName}`}
+            image={betriebBild}
+            imageAlt={betriebName}
+          />
         )}
         <div />
       </div>

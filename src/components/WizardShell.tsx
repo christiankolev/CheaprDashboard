@@ -1,12 +1,15 @@
 import { ReactNode } from 'react'
 import CheaprLogo from '../CheaprLogo.svg'
+import BetriebBadge from './BetriebBadge'
 
 interface WizardShellProps {
   stepCount?: string
   stepName?: string
   totalSteps?: number
   currentStep?: number
-  contextBadge?: string
+  betriebCode?: string
+  betriebName?: string
+  betriebBild?: string
   title: string
   hint?: string
   children: ReactNode
@@ -23,7 +26,9 @@ export default function WizardShell({
   stepName,
   totalSteps,
   currentStep,
-  contextBadge,
+  betriebCode,
+  betriebName,
+  betriebBild,
   title,
   hint,
   children,
@@ -38,7 +43,7 @@ export default function WizardShell({
     totalSteps && currentStep ? Math.round((currentStep / totalSteps) * 100) : 0
 
   return (
-    <div className="flex min-h-dvh flex-col bg-cheapr-page">
+    <div className="flex min-h-dvh flex-col bg-[#F5A200]">
 
       {totalSteps && currentStep && (
         <div className="h-[3px] w-full bg-cheapr-dark/15">
@@ -65,10 +70,12 @@ export default function WizardShell({
           <div className="h-9 w-9" />
         )}
 
-        {contextBadge && (
-          <div style={{ backgroundColor: '#222222', color: '#F5A200' }} className="rounded-full px-3 py-1">
-            <span className="text-[11px] font-bold">{contextBadge}</span>
-          </div>
+        {betriebCode && betriebName && (
+          <BetriebBadge
+            label={`${betriebCode} · ${betriebName}`}
+            image={betriebBild}
+            imageAlt={betriebName}
+          />
         )}
 
         {stepCount ? (

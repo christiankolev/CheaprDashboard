@@ -7,7 +7,7 @@ export default function BetriebPage() {
 
   if (!betriebId) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-cheapr-yellow">
+      <div className="flex min-h-dvh items-center justify-center bg-[#F5A200]">
         <p className="font-bold text-cheapr-dark">Betrieb nicht gefunden</p>
       </div>
     )
@@ -17,7 +17,7 @@ export default function BetriebPage() {
 
   if (!betrieb) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-cheapr-yellow">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[#F5A200]">
         <p className="font-bold text-cheapr-dark">Betrieb nicht gefunden</p>
         <Link to="/" className="text-sm font-semibold text-cheapr-dark underline">
           Zurück

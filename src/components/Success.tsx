@@ -23,7 +23,7 @@ export default function Success({ generatedPost, onNeuesAngebot }: SuccessProps)
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-cheapr-page px-5 py-6">
+    <div className="flex min-h-dvh flex-col bg-[#F5A200] px-5 py-6">
       <div className="mx-auto w-full max-w-md flex-1 flex flex-col justify-center">
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-cheapr-dark/40">
           Fertig!
