@@ -1,8 +1,26 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import CheaprLogo from '../CheaprLogo.svg'
+import ImgCouple from '../../pexels-cup-of-couple-6963524.webp'
+import ImgUrban from '../../pexels-memet-oz-296480690-38043281.webp'
+import ImgNature from '../../pexels-justyna-serafin-127253298-18794028.webp'
+import type { AngebotType } from './AngebotTypeSelector'
+
+interface SuccessItem {
+  id: string
+  name: string
+  price: number
+  count: number
+}
 
 interface SuccessProps {
   onNeuesAngebot: () => void
+  items: SuccessItem[]
+  angebotType: AngebotType
+  verkaufspreis: number
+}
+
+function formatPrice(num: number): string {
+  return num % 1 === 0 ? String(num) : num.toFixed(2).replace('.', ',')
 }
 
 function ConfettiCanvas() {
@@ -17,9 +35,9 @@ function ConfettiCanvas() {
     canvas.width = window.innerWidth
     canvas.height = window.innerHeight
 
-    const COLORS = ['#222222', '#1a1a1a', '#ffffff', '#F5A200', '#FFD166']
+    const COLORS = ['#222222', '#1a1a1a', '#ffffff', '#ff6b35', '#FFD166']
 
-    const particles = Array.from({ length: 60 }, () => ({
+    const particles = Array.from({ length: 80 }, () => ({
       x: Math.random() * canvas.width,
       y: -20 - Math.random() * 400,
       vx: (Math.random() - 0.5) * 1.8,
@@ -33,15 +51,15 @@ function ConfettiCanvas() {
 
     let raf: number
     const start = performance.now()
-    const DURATION = 4200
+    const DURATION = 4800
 
     function draw(now: number) {
       const elapsed = now - start
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height)
 
-      const fadeStart = DURATION - 900
+      const fadeStart = DURATION - 1000
       const alpha = elapsed > fadeStart
-        ? Math.max(0, 1 - (elapsed - fadeStart) / 900)
+        ? Math.max(0, 1 - (elapsed - fadeStart) / 1000)
         : 1
 
       particles.forEach((p) => {
@@ -49,7 +67,6 @@ function ConfettiCanvas() {
         p.y += p.vy
         p.vy += 0.045
         p.angle += p.spin
-
         ctx!.save()
         ctx!.globalAlpha = alpha
         ctx!.fillStyle = p.color
@@ -75,136 +92,201 @@ function ConfettiCanvas() {
   )
 }
 
-function LeafIllustration() {
+const STATS = [
+  { num: '~3', unit: 'kg', label: 'CO₂ gespart', sub: 'Treibhausgas vermieden', img: ImgCouple },
+  { num: '≈15', unit: 'km', label: 'Weniger Fahrt', sub: 'Autofahrt eingespart', img: ImgUrban },
+  { num: '≈500', unit: 'L', label: 'Wasser gespart', sub: 'Virtuelle Produktion', img: ImgNature },
+]
+
+function BenefitCarousel() {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [active, setActive] = useState(0)
+
+  const onScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const slideWidth = el.offsetWidth
+    if (slideWidth === 0) return
+    setActive(Math.round(el.scrollLeft / slideWidth))
+  }
+
   return (
-    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-      <path
-        d="M32 6 C10 6 8 28 8 40 C18 40 32 36 42 24"
-        stroke="#F5A200" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.9"
-      />
-      <path
-        d="M32 6 C54 6 56 28 56 40 C46 40 32 36 22 24"
-        stroke="#F5A200" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.5"
-      />
-      <line x1="32" y1="58" x2="32" y2="28" stroke="#F5A200" strokeWidth="1.5" strokeLinecap="round" opacity="0.7" />
-      <line x1="32" y1="44" x2="22" y2="36" stroke="#F5A200" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
-      <line x1="32" y1="38" x2="42" y2="30" stroke="#F5A200" strokeWidth="1.5" strokeLinecap="round" opacity="0.4" />
-    </svg>
+    <div className="mt-8 w-full" style={{ animation: 'slideUp 0.45s 0.12s ease-out both' }}>
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {STATS.map(({ num, unit, label, sub, img }, i) => (
+          <div
+            key={label}
+            className="w-full shrink-0 snap-center px-0.5"
+            style={{ animation: `slideUp 0.45s ${0.15 + i * 0.08}s ease-out both` }}
+          >
+            <div className="relative aspect-[4/5] w-full overflow-hidden rounded-3xl">
+              <img
+                src={img}
+                alt={label}
+                className="absolute inset-0 h-full w-full object-cover"
+              />
+
+              {/* Weiße Kapsel unten im Bild */}
+              <div className="absolute inset-x-4 bottom-4">
+                <div className="flex items-center gap-3 rounded-2xl bg-white px-3 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.18)]">
+                  <img
+                    src={img}
+                    alt=""
+                    className="h-12 w-12 shrink-0 rounded-xl object-cover"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[15px] font-bold leading-tight text-[#222222]">
+                      {label}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs font-medium text-[#222222]/45">
+                      {sub}
+                    </p>
+                  </div>
+                  <div className="shrink-0 pl-1 text-right">
+                    <span className="text-xl font-black leading-none text-emerald-600">
+                      {num}
+                      <span className="text-sm">{unit}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Pagination dots */}
+      <div className="mt-4 flex justify-center gap-2">
+        {STATS.map(({ label }, i) => (
+          <button
+            key={label}
+            type="button"
+            aria-label={`Vorteil ${i + 1}`}
+            onClick={() => {
+              const el = scrollRef.current
+              if (!el) return
+              el.scrollTo({ left: i * el.offsetWidth, behavior: 'smooth' })
+            }}
+            className={`h-2 rounded-full transition-all ${
+              active === i ? 'w-6 bg-cheapr-dark' : 'w-2 bg-cheapr-dark/20'
+            }`}
+          />
+        ))}
+      </div>
+
+      <p className="mt-2 text-center text-[10px] font-bold text-cheapr-dark/35">
+        Nach rechts wischen
+      </p>
+    </div>
   )
 }
 
-function CarIllustration() {
-  return (
-    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-      <path
-        d="M8 38 L14 26 L20 22 L44 22 L50 26 L56 38 L56 46 L8 46 Z"
-        stroke="#F5A200" strokeWidth="2" strokeLinejoin="round" fill="none" opacity="0.9"
-      />
-      <circle cx="20" cy="46" r="5" stroke="#F5A200" strokeWidth="2" fill="none" opacity="0.7" />
-      <circle cx="44" cy="46" r="5" stroke="#F5A200" strokeWidth="2" fill="none" opacity="0.7" />
-      <path d="M22 30 L28 24 L40 24 L46 30 Z" stroke="#F5A200" strokeWidth="1.5" strokeLinejoin="round" fill="none" opacity="0.4" />
-      <line x1="8" y1="36" x2="56" y2="36" stroke="#F5A200" strokeWidth="1" opacity="0.25" />
-    </svg>
-  )
-}
+export default function Success({ onNeuesAngebot, items, angebotType, verkaufspreis }: SuccessProps) {
+  const warenwert = items.reduce((s, i) => s + i.price * i.count, 0)
 
-function WaterIllustration() {
-  return (
-    <svg width="64" height="64" viewBox="0 0 64 64" fill="none" aria-hidden="true">
-      <path
-        d="M32 8 Q48 26 48 38 A16 16 0 0 1 16 38 Q16 26 32 8 Z"
-        stroke="#F5A200" strokeWidth="2" strokeLinejoin="round" fill="none" opacity="0.9"
-      />
-      <path
-        d="M24 38 Q28 33 32 38 Q36 43 40 38"
-        stroke="#F5A200" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.5"
-      />
-      <path
-        d="M22 44 Q26 40 30 44"
-        stroke="#F5A200" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.3"
-      />
-    </svg>
-  )
-}
-
-
-export default function Success({ onNeuesAngebot }: SuccessProps) {
   return (
     <>
+      <style>{`
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bounceDown {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(6px); }
+        }
+      `}</style>
+
       <ConfettiCanvas />
-      <div className="relative z-10 flex min-h-dvh flex-col bg-[#ECEAE6] px-5 py-6">
-        <div className="mx-auto w-full max-w-md flex-1 flex flex-col justify-center gap-3">
 
-          {/* Bento grid: 2 cols, left card spans 2 rows */}
-          <div className="grid grid-cols-2 gap-3">
+      <div className="relative z-10 bg-[#F5A200]">
 
-            {/* Left tall card: success message + CTA */}
-            <div className="row-span-2 flex flex-col justify-between overflow-hidden rounded-3xl bg-white p-5">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-black/40">
-                  Fertig!
-                </p>
-                <h2 className="mt-3 text-[2rem] font-black leading-tight tracking-tight text-black">
-                  Angebot<br />live!
-                </h2>
-                <p className="mt-2 text-sm font-medium text-black/50">
-                  Du hast gerade etwas Gutes getan.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={onNeuesAngebot}
-                className="mt-6 flex items-center justify-between gap-2 rounded-2xl bg-[#222] px-4 py-3 text-[13px] font-black text-[#F5A200] transition-all hover:opacity-90 active:scale-[0.97]"
-              >
-                Neues Angebot
-                <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-                  <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
+        {/* ── Viewport 1: Erfolg + Vorteile ── */}
+        <section className="flex min-h-dvh flex-col px-5 py-8">
+          <div className="mx-auto w-full max-w-md flex-1 flex flex-col justify-center">
+            <div className="w-full text-center" style={{ animation: 'slideUp 0.4s ease-out both' }}>
+              <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-cheapr-dark/40">
+                Fertig!
+              </p>
+              <h1 className="mt-1 text-[2.2rem] font-black leading-tight tracking-tight text-cheapr-dark">
+                Dein Lefty ist live!
+              </h1>
+              <p className="mt-2 text-sm font-medium text-cheapr-dark/60">
+                Du hast gerade etwas Gutes getan.
+              </p>
             </div>
 
-            {/* Top right: CO₂ */}
-            <div className="relative flex flex-col justify-between overflow-hidden rounded-3xl bg-[#F5A200] p-4">
-              <div>
-                <p className="text-[1.7rem] font-black leading-none text-[#222]">~3 kg</p>
-                <p className="mt-1 text-[11px] font-black text-[#222]">CO₂ gerettet</p>
-                <p className="mt-0.5 text-[10px] font-medium text-[#222]/50 leading-snug">weniger Treibhausgas</p>
-              </div>
-              <div className="mt-2 self-end opacity-30 scale-75 origin-bottom-right">
-                <LeafIllustration />
-              </div>
-            </div>
-
-            {/* Bottom right: Autofahrt */}
-            <div className="relative flex flex-col justify-between overflow-hidden rounded-3xl bg-white p-4">
-              <div>
-                <p className="text-[1.7rem] font-black leading-none text-black">≈ 15 km</p>
-                <p className="mt-1 text-[11px] font-black text-black">Autofahrt gespart</p>
-                <p className="mt-0.5 text-[10px] font-medium text-black/40 leading-snug">so viel CO₂ wäre sonst emittiert</p>
-              </div>
-              <div className="mt-2 self-end opacity-20 scale-75 origin-bottom-right">
-                <CarIllustration />
-              </div>
-            </div>
+            <BenefitCarousel />
           </div>
 
-          {/* Full-width bottom card: Wasser */}
-          <div className="flex items-center justify-between overflow-hidden rounded-3xl bg-[#222] px-6 py-5">
-            <div>
-              <p className="text-[2rem] font-black leading-none text-[#F5A200]">≈ 500 L</p>
-              <p className="mt-1 text-sm font-black text-[#F5A200]">Wasser gespart</p>
-              <p className="mt-0.5 text-[11px] font-medium text-[#F5A200]/40 leading-snug">virtuelles Wasser aus der Produktion</p>
+          {/* Scroll-Hinweis */}
+          <div
+            className="mx-auto flex flex-col items-center pb-4 pt-8"
+            style={{ animation: 'bounceDown 1.8s ease-in-out infinite' }}
+          >
+            <svg width="20" height="20" viewBox="0 0 14 14" fill="none" className="text-cheapr-dark/40">
+              <path d="M2.5 5L7 9.5L11.5 5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="mt-1 text-[10px] font-bold text-cheapr-dark/35">Nach unten scrollen</span>
+          </div>
+        </section>
+
+        {/* ── Viewport 2: Lefty-Inhalt + CTA ── */}
+        <section className="flex min-h-dvh flex-col justify-center px-5 pb-10 pt-6">
+          <div className="mx-auto w-full max-w-md space-y-5">
+
+            <div
+              style={{ backgroundColor: '#222222', color: '#F5A200' }}
+              className="rounded-2xl px-5 py-4"
+            >
+              <p className="text-[10px] font-bold uppercase tracking-[0.15em] opacity-40">
+                Lefty {angebotType} · Inhalt
+              </p>
+
+              <div className="mt-3 space-y-2">
+                {items.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between">
+                    <span className="text-sm font-bold">
+                      {item.count > 1 ? `${item.count}× ` : ''}{item.name}
+                    </span>
+                    <span className="text-sm font-bold opacity-60">
+                      {formatPrice(item.price * item.count)} €
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 h-px" style={{ backgroundColor: 'rgba(245,162,0,0.15)' }} />
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-xs font-bold opacity-50">70% günstiger</span>
+                <span className="text-base font-black">{formatPrice(verkaufspreis)} €</span>
+              </div>
+              {warenwert > 0 && (
+                <p className="mt-1 text-[10px] font-medium opacity-30">statt {formatPrice(warenwert)} €</p>
+              )}
             </div>
-            <div className="opacity-60">
-              <WaterIllustration />
+
+            <button
+              type="button"
+              onClick={onNeuesAngebot}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-cheapr-dark px-6 py-4 text-[15px] font-black text-[#F5A200] transition-all hover:opacity-90 active:scale-[0.98]"
+            >
+              Neues Angebot
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            <div className="flex justify-center pt-2">
+              <img src={CheaprLogo} alt="Cheapr" className="h-7 w-auto opacity-20" />
             </div>
           </div>
+        </section>
 
-        </div>
-
-        <div className="flex justify-center pb-3 pt-5">
-          <img src={CheaprLogo} alt="Cheapr" className="h-7 w-auto opacity-20" />
-        </div>
       </div>
     </>
   )

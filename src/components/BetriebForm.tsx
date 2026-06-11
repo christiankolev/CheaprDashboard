@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
+import LeftyTueteSrc from '../../leftytüte.svg'
 import type { Betrieb } from '../config/betriebe'
-import { sendAngebotToTelegram } from '../lib/telegram'
+import { sendAngebotToTelegram, sendTextToTelegram } from '../lib/telegram'
 import AngebotTypeSelector, { LEFTY_PRICES, type AngebotType } from './AngebotTypeSelector'
-import StepperInput, { OUTLINE_DARK, QuantityPicker } from './StepperInput'
+import StepperInput, { QuantityPicker } from './StepperInput'
 import Success from './Success'
 import WizardShell from './WizardShell'
 
@@ -19,6 +20,40 @@ interface BoxItem {
 
 type LeftyStep = 'photo' | 'add-item' | 'overview' | 'time'
 
+interface BoxState {
+  id: string
+  angebotType: AngebotType | null
+  step: LeftyStep
+  items: BoxItem[]
+  draftName: string
+  draftPrice: string
+  draftCount: number
+  abholzeit: string
+  foto: File | null
+  fotoPreview: string | null
+  submitted: boolean
+  loading: boolean
+  error: string | null
+}
+
+function createEmptyBox(): BoxState {
+  return {
+    id: crypto.randomUUID(),
+    angebotType: null,
+    step: 'overview',
+    items: [],
+    draftName: '',
+    draftPrice: '',
+    draftCount: 1,
+    abholzeit: '',
+    foto: null,
+    fotoPreview: null,
+    submitted: false,
+    loading: false,
+    error: null,
+  }
+}
+
 function parsePrice(value: string): number {
   return parseFloat(value.replace(',', '.'))
 }
@@ -31,8 +66,11 @@ function boxTotalPrice(items: BoxItem[]): number {
   return items.reduce((sum, i) => sum + i.price * i.count, 0)
 }
 
-function calcFestpreis(size: AngebotType, verkaufspreis: number): number {
-  return size === 'Mini' ? Math.min(verkaufspreis, 3) : LEFTY_PRICES[size]
+function autoDetectBoxType(verkaufspreis: number): AngebotType {
+  if (verkaufspreis >= LEFTY_PRICES['L']) return 'L'
+  if (verkaufspreis >= LEFTY_PRICES['M']) return 'M'
+  if (verkaufspreis >= LEFTY_PRICES['S']) return 'S'
+  return 'Mini'
 }
 
 function buildTelegramCaption(
@@ -43,7 +81,6 @@ function buildTelegramCaption(
 ): string {
   const warenwert = boxTotalPrice(items)
   const verkaufspreis = Math.round(warenwert * 0.3 * 100) / 100
-  const festpreis = calcFestpreis(size, verkaufspreis)
   const itemLines = items
     .map((i) => {
       const qty = i.count > 1 ? `${i.count}× ` : ''
@@ -57,7 +94,7 @@ function buildTelegramCaption(
     ``,
     itemLines,
     ``,
-    `💰 ${formatPrice(festpreis)} €  (statt ${formatPrice(warenwert)} €)`,
+    `💰 ${formatPrice(verkaufspreis)} €  (statt ${formatPrice(warenwert)} €)`,
     `🕕 Abholung: bis ${abholzeit} Uhr`,
     `📍 ${betrieb.adresse}`,
     ``,
@@ -65,6 +102,8 @@ function buildTelegramCaption(
     `⚡️ First come, first served`,
   ].join('\n')
 }
+
+const MAX_VERKAUFSPREIS = 10
 
 const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
 
@@ -74,253 +113,576 @@ const INPUT_CLS =
 const TIME_CLS =
   'w-full rounded-2xl px-4 py-4 text-center text-2xl font-black focus:outline-none [color-scheme:dark]'
 
+// ─── Lefty Nav ────────────────────────────────────────────────────────────────
+
+interface LeftyNavProps {
+  boxes: BoxState[]
+  activeId: string
+  open: boolean
+  onToggle: () => void
+  onSwitchBox: (id: string) => void
+  onDeleteBox: (id: string) => void
+  onReset: () => void
+}
+
+function LeftyNav({ boxes, activeId, open, onToggle, onSwitchBox, onDeleteBox, onReset }: LeftyNavProps) {
+  const visibleBoxes = boxes.filter(b => b.angebotType !== null)
+  if (visibleBoxes.length === 0) return null
+
+  const pendingCount = visibleBoxes.filter(b => !b.submitted).length
+
+  return (
+    <>
+      <style>{`
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to   { transform: translateX(0); }
+        }
+      `}</style>
+
+      {/* Floating button */}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label="Box-Übersicht öffnen"
+        className="fixed top-[14px] right-5 z-40 flex items-center justify-center"
+      >
+        <div className="relative">
+          <img src={LeftyTueteSrc} alt="Lefty" className="h-[30px] w-auto" />
+          {pendingCount > 0 && (
+            <span
+              className="absolute -top-1.5 -right-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-0.5 text-[10px] font-black"
+              style={{ backgroundColor: '#222222', color: '#F5A200' }}
+            >
+              {pendingCount}
+            </span>
+          )}
+        </div>
+      </button>
+
+      {/* Backdrop + panel */}
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]"
+            onClick={onToggle}
+          />
+          <div
+            className="fixed right-0 top-0 z-50 flex h-full w-72 max-w-[85vw] flex-col bg-[#F5A200]"
+            style={{ animation: 'slideInRight 0.22s ease-out both', boxShadow: '-8px 0 32px rgba(0,0,0,0.25)' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-cheapr-dark/10">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-cheapr-dark/40">Meine Boxes</p>
+                <h3 className="mt-0.5 text-lg font-black text-cheapr-dark">Lefty-Übersicht</h3>
+              </div>
+              <button
+                type="button"
+                onClick={onToggle}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-cheapr-dark/10 text-cheapr-dark/50 hover:bg-cheapr-dark/20"
+                aria-label="Schließen"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                  <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Box list */}
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+              {boxes.map((box, i) => {
+                if (box.angebotType === null) return null
+                const warenwert = boxTotalPrice(box.items)
+                const vp = Math.round(warenwert * 0.3 * 100) / 100
+                const isActive = box.id === activeId
+
+                return (
+                  <div key={box.id} className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => !box.submitted && onSwitchBox(box.id)}
+                      disabled={box.submitted}
+                      className={`w-full text-left rounded-2xl p-4 transition-all active:scale-[0.98] ${
+                        isActive ? 'ring-2 ring-cheapr-dark/25' : ''
+                      } ${box.submitted ? 'opacity-50 cursor-default' : 'hover:opacity-90'}`}
+                      style={DARK_BOX}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-bold opacity-40">Box {i + 1}</span>
+                        {box.submitted
+                          ? <span className="text-[10px] font-black text-green-400">✓ Gesendet</span>
+                          : isActive
+                            ? <span className="block h-2.5 w-2.5 rounded-full bg-green-400" />
+                            : null}
+                      </div>
+                      <p className="text-sm font-black">Lefty {box.angebotType}</p>
+                      {box.items.length > 0 ? (
+                        <div className="mt-1.5 space-y-0.5">
+                          {box.items.slice(0, 3).map(item => (
+                            <p key={item.id} className="text-[11px] font-medium opacity-50 truncate">
+                              {item.count > 1 ? `${item.count}× ` : ''}{item.name}
+                            </p>
+                          ))}
+                          {box.items.length > 3 && (
+                            <p className="text-[10px] opacity-30">+{box.items.length - 3} weitere</p>
+                          )}
+                          <p className="mt-2 text-sm font-black">{formatPrice(vp)} €</p>
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-[11px] font-medium opacity-40">Noch leer</p>
+                      )}
+                    </button>
+                    {!box.submitted && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteBox(box.id)}
+                        aria-label={`Box ${i + 1} löschen`}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[11px] font-bold text-cheapr-dark/30 transition-all hover:bg-cheapr-dark/10 hover:text-cheapr-dark/50 active:scale-[0.98]"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                          <path d="M2 3.5h10M5.5 3.5V2.5h3v1M6 6v4.5M8 6v4.5M3 3.5l.7 8h6.6l.7-8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        Löschen
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Footer — Neustart */}
+            <div className="px-4 pb-5 pt-3 border-t border-cheapr-dark/10">
+              <button
+                type="button"
+                onClick={onReset}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black text-cheapr-dark/50 transition-all hover:bg-cheapr-dark/10 active:scale-[0.98]"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 7a5 5 0 1 0 1.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M2 3.5V7h3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Neustart
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
+
 export default function BetriebForm({ betrieb }: BetriebFormProps) {
-  const [angebotType, setAngebotType] = useState<AngebotType | null>(null)
-  const [step, setStep] = useState<LeftyStep>('photo')
+  // Stable initial state — lazy init ensures one box + matching ID
+  const [{ initBoxes, initActiveId }] = useState(() => {
+    const firstBox = createEmptyBox()
+    return { initBoxes: [firstBox] as BoxState[], initActiveId: firstBox.id }
+  })
 
-  const [abholzeit, setAbholzeit] = useState('')
-  const [foto, setFoto] = useState<File | null>(null)
-  const [fotoPreview, setFotoPreview] = useState<string | null>(null)
-
-  const [boxItems, setBoxItems] = useState<BoxItem[]>([])
-  const [draftName, setDraftName] = useState('')
-  const [draftPrice, setDraftPrice] = useState('')
-  const [draftCount, setDraftCount] = useState(1)
-
-  const [showUnderfillPopup, setShowUnderfillPopup] = useState(false)
-  const [showOverfillPopup, setShowOverfillPopup] = useState(false)
-
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
+  const [boxes, setBoxes] = useState<BoxState[]>(initBoxes)
+  const [activeId, setActiveId] = useState(initActiveId)
+  const [navOpen, setNavOpen] = useState(false)
+  const [globalSuccess, setGlobalSuccess] = useState(false)
+  const [sheetMounted, setSheetMounted] = useState(false)
+  const [sheetVisible, setSheetVisible] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const resetForm = () => {
-    setAngebotType(null)
-    setStep('photo')
-    setAbholzeit('')
-    setFoto(null)
-    setFotoPreview(null)
-    setBoxItems([])
-    setDraftName('')
-    setDraftPrice('')
-    setDraftCount(1)
-    setShowUnderfillPopup(false)
-    setShowOverfillPopup(false)
-    setError(null)
-    setSuccess(false)
-    setLoading(false)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+  const openAddSheet = () => {
+    updateBox(activeId, { error: null })
+    setSheetMounted(true)
+    requestAnimationFrame(() => requestAnimationFrame(() => setSheetVisible(true)))
   }
 
-  const handleFotoChange = (file: File | null) => {
-    setFoto(file)
-    if (fotoPreview) URL.revokeObjectURL(fotoPreview)
-    setFotoPreview(file ? URL.createObjectURL(file) : null)
+  const closeAddSheet = () => {
+    setSheetVisible(false)
+    setTimeout(() => setSheetMounted(false), 320)
   }
 
-  const submitAngebot = async () => {
-    if (!foto) { setError('Bitte ein Foto hochladen.'); return }
-    if (!abholzeit) { setError('Bitte eine Abholzeit angeben.'); return }
-    if (!angebotType) return
+  const updateBox = (id: string, updates: Partial<BoxState>) => {
+    setBoxes(prev => prev.map(b => b.id === id ? { ...b, ...updates } : b))
+  }
 
-    setError(null)
-    setLoading(true)
+  const getActive = (): BoxState | undefined => boxes.find(b => b.id === activeId)
+
+  const addNewBox = () => {
+    const newBox: BoxState = { ...createEmptyBox(), angebotType: 'Mini', step: 'overview' }
+    setBoxes(prev => [...prev, newBox])
+    setActiveId(newBox.id)
+    setNavOpen(false)
+  }
+
+  const resetAll = () => {
+    const freshBox = createEmptyBox()
+    setBoxes([freshBox])
+    setActiveId(freshBox.id)
+    setGlobalSuccess(false)
+    setNavOpen(false)
+  }
+
+  const deleteBox = (id: string) => {
+    const remaining = boxes.filter(b => b.id !== id)
+    if (remaining.length === 0) {
+      resetAll()
+      return
+    }
+    setBoxes(remaining)
+    if (activeId === id) setActiveId(remaining[remaining.length - 1].id)
+    setNavOpen(false)
+  }
+
+  const submitActiveBox = async () => {
+    const box = getActive()
+    if (!box || !box.angebotType) return
+    if (!box.abholzeit) { updateBox(activeId, { error: 'Bitte eine Abholzeit angeben.' }); return }
+
+    updateBox(activeId, { error: null, loading: true })
 
     try {
-      const caption = buildTelegramCaption(angebotType, boxItems, abholzeit, betrieb)
-      await sendAngebotToTelegram(foto, caption)
-      setSuccess(true)
+      const caption = buildTelegramCaption(box.angebotType, box.items, box.abholzeit, betrieb)
+      if (box.foto) {
+        await sendAngebotToTelegram(box.foto, caption)
+      } else {
+        await sendTextToTelegram(caption)
+      }
+
+      const newBoxes = boxes.map(b =>
+        b.id === activeId ? { ...b, submitted: true, loading: false } : b
+      )
+      setBoxes(newBoxes)
+
+      const nextPending = newBoxes.find(
+        b => b.id !== activeId && !b.submitted && b.items.length > 0
+      )
+      if (nextPending) {
+        setActiveId(nextPending.id)
+      } else {
+        setGlobalSuccess(true)
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unbekannter Fehler beim Absenden.')
-    } finally {
-      setLoading(false)
+      updateBox(activeId, {
+        loading: false,
+        error: err instanceof Error ? err.message : 'Unbekannter Fehler beim Absenden.',
+      })
     }
   }
 
-  const addBoxItem = () => {
-    const price = parsePrice(draftPrice)
-    if (!draftName.trim()) { setError('Bitte einen Namen eingeben.'); return }
-    if (isNaN(price) || price <= 0) { setError('Bitte einen gültigen Preis eingeben.'); return }
-    setError(null)
-    setBoxItems((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), name: draftName.trim(), price, count: draftCount },
-    ])
-    setDraftName('')
-    setDraftPrice('')
-    setDraftCount(1)
-    setStep('overview')
+  const addBoxItem = (): boolean => {
+    const box = getActive()
+    if (!box) return false
+    const price = parsePrice(box.draftPrice)
+    if (!box.draftName.trim()) { updateBox(activeId, { error: 'Bitte einen Namen eingeben.' }); return false }
+    if (isNaN(price) || price <= 0) { updateBox(activeId, { error: 'Bitte einen gültigen Preis eingeben.' }); return false }
+
+    const newItem = { id: crypto.randomUUID(), name: box.draftName.trim(), price, count: box.draftCount }
+    const candidateItems = [...box.items, newItem]
+    const candidateWarenwert = boxTotalPrice(candidateItems)
+    const candidateVp = Math.round(candidateWarenwert * 0.3 * 100) / 100
+
+    // Auto-split: wenn Verkaufspreis > Max → neues Item in neue Box packen
+    if (candidateVp > MAX_VERKAUFSPREIS && box.items.length > 0) {
+      const currentVp = Math.round(boxTotalPrice(box.items) * 0.3 * 100) / 100
+      const overflowVp = Math.round(newItem.price * newItem.count * 0.3 * 100) / 100
+      const overflowBox: BoxState = {
+        ...createEmptyBox(),
+        items: [newItem],
+        angebotType: autoDetectBoxType(overflowVp),
+        step: 'overview',
+      }
+      setBoxes(prev => [
+        ...prev.map(b => b.id === activeId
+          ? { ...b, angebotType: autoDetectBoxType(currentVp), draftName: '', draftPrice: '', draftCount: 1, error: `"${newItem.name}" wurde in eine neue Box verschoben (max. ${MAX_VERKAUFSPREIS} €)`, step: 'overview' as LeftyStep }
+          : b
+        ),
+        overflowBox,
+      ])
+      setActiveId(overflowBox.id)
+      return true
+    }
+
+    updateBox(activeId, {
+      items: candidateItems,
+      angebotType: autoDetectBoxType(candidateVp),
+      draftName: '',
+      draftPrice: '',
+      draftCount: 1,
+      error: null,
+      step: 'overview',
+    })
+    return true
   }
 
-  if (success) {
-    return <Success onNeuesAngebot={resetForm} />
-  }
+  // ─── Global success ───────────────────────────────────────────────────────
 
-  const LEFTY_ORDER: AngebotType[] = ['Mini', 'S', 'M', 'L']
-
-  if (!angebotType) {
+  if (globalSuccess) {
+    const lastSubmitted = [...boxes].reverse().find(b => b.submitted) ?? boxes[0]
+    const warenwert = boxTotalPrice(lastSubmitted.items)
+    const vp = Math.round(warenwert * 0.3 * 100) / 100
     return (
-      <AngebotTypeSelector
-        onSelect={(type) => { setAngebotType(type); setStep('photo') }}
-        betriebCode={betrieb.code}
-        betriebName={betrieb.name}
-        betriebBild={betrieb.bild}
-      />
+      <>
+        <Success
+          onNeuesAngebot={resetAll}
+          items={lastSubmitted.items}
+          angebotType={lastSubmitted.angebotType ?? 'S'}
+          verkaufspreis={vp}
+        />
+        <LeftyNav
+          boxes={boxes}
+          activeId={activeId}
+          open={navOpen}
+          onToggle={() => setNavOpen(v => !v)}
+          onSwitchBox={(id) => { setActiveId(id); setGlobalSuccess(false); setNavOpen(false) }}
+          onDeleteBox={deleteBox}
+          onReset={resetAll}
+        />
+      </>
     )
   }
+
+  // ─── Active box ───────────────────────────────────────────────────────────
+
+  const active = getActive()
+  if (!active) return null
 
   const betriebBadge = {
     betriebCode: betrieb.code,
     betriebName: betrieb.name,
     betriebBild: betrieb.bild,
-    betriebSubtitle: `Lefty ${angebotType}`,
+    betriebSubtitle: active.angebotType ? `Lefty ${active.angebotType}` : undefined,
   }
 
-  const errorBanner = error ? (
+  const errorBanner = active.error ? (
     <div className="mb-4 rounded-xl bg-red-500/20 px-4 py-2.5 text-center text-xs font-bold text-red-300">
-      {error}
+      {active.error}
     </div>
   ) : null
 
-  // ─── PHOTO ────────────────────────────────────────────────
+  // ─── SELECTOR ─────────────────────────────────────────────────────────────
 
-  if (step === 'photo') return (
-    <WizardShell
-      {...betriebBadge}
-      stepCount="1 / 3"
-      stepName="Foto"
-      currentStep={1}
-      totalSteps={3}
-      title="Foto machen"
-      hint="Knips ein Bild der übrigen Sachen"
-      onBack={() => setAngebotType(null)}
-      onNext={() => {
-        if (!foto) { setError('Bitte ein Foto hochladen.'); return }
-        setError(null); setStep('add-item')
-      }}
-    >
-      {errorBanner}
-      <PhotoPicker fotoPreview={fotoPreview} onClick={() => fileInputRef.current?.click()} />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => handleFotoChange(e.target.files?.[0] ?? null)}
-      />
-    </WizardShell>
-  )
+  if (!active.angebotType) {
+    return (
+      <>
+        <AngebotTypeSelector
+          onSelect={(type) => updateBox(activeId, { angebotType: type, step: 'overview' })}
+          betriebCode={betrieb.code}
+          betriebName={betrieb.name}
+          betriebBild={betrieb.bild}
+        />
+        {boxes.some(b => b.angebotType !== null) && (
+          <LeftyNav
+            boxes={boxes}
+            activeId={activeId}
+            open={navOpen}
+            onToggle={() => setNavOpen(v => !v)}
+            onSwitchBox={(id) => { setActiveId(id); setNavOpen(false) }}
+            onDeleteBox={deleteBox}
+            onReset={resetAll}
+          />
+        )}
+      </>
+    )
+  }
 
-  // ─── ADD ITEM ─────────────────────────────────────────────
+  // ─── PHOTO (kept for future) ───────────────────────────────────────────────
 
-  if (step === 'add-item') return (
-    <WizardShell
-      {...betriebBadge}
-      stepCount="2 / 3"
-      stepName="Artikel"
-      currentStep={2}
-      totalSteps={3}
-      title="Was ist drin?"
-      onBack={() => {
-        setError(null)
-        setDraftName('')
-        setDraftPrice('')
-        setDraftCount(1)
-        setStep(boxItems.length > 0 ? 'overview' : 'photo')
-      }}
-      onNext={addBoxItem}
-      nextLabel="Hinzufügen"
-    >
-      {errorBanner}
-      <div className="space-y-3">
+  if (active.step === 'photo') return (
+    <>
+      <WizardShell
+        {...betriebBadge}
+        currentStep={1}
+        totalSteps={3}
+        title="Foto machen"
+        hint="Knips ein Bild der übrigen Sachen"
+        onBack={() => updateBox(activeId, { angebotType: null })}
+        onNext={() => {
+          if (!active.foto) { updateBox(activeId, { error: 'Bitte ein Foto hochladen.' }); return }
+          updateBox(activeId, { error: null, step: 'add-item' })
+        }}
+      >
+        {errorBanner}
+        <PhotoPicker
+          fotoPreview={active.fotoPreview}
+          onClick={() => fileInputRef.current?.click()}
+        />
         <input
-          type="text"
-          autoFocus
-          value={draftName}
-          onChange={(e) => { setDraftName(e.target.value); setError(null) }}
-          placeholder="Name (z.B. Croissant)"
-          style={DARK_BOX}
-          className={INPUT_CLS}
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0] ?? null
+            if (active.fotoPreview) URL.revokeObjectURL(active.fotoPreview)
+            updateBox(activeId, {
+              foto: file,
+              fotoPreview: file ? URL.createObjectURL(file) : null,
+            })
+          }}
         />
-        <StepperInput
-          value={draftPrice}
-          onChange={(v) => { setDraftPrice(v); setError(null) }}
-          step={0.5} min={0.5} suffix="€" placeholder="0"
-        />
-        <QuantityPicker
-          value={draftCount}
-          onChange={(n) => { setDraftCount(n); setError(null) }}
-        />
-      </div>
-    </WizardShell>
+      </WizardShell>
+      <LeftyNav
+        boxes={boxes}
+        activeId={activeId}
+        open={navOpen}
+        onToggle={() => setNavOpen(v => !v)}
+        onSwitchBox={(id) => { setActiveId(id); setNavOpen(false) }}
+        onDeleteBox={deleteBox}
+        onReset={resetAll}
+      />
+    </>
   )
 
-  // ─── OVERVIEW / DASHBOARD ─────────────────────────────────
+  // ─── ADD ITEM ─────────────────────────────────────────────────────────────
 
-  if (step === 'overview') {
-    const warenwert = boxTotalPrice(boxItems)
+  if (active.step === 'add-item') return (
+    <>
+      <WizardShell
+        {...betriebBadge}
+        currentStep={1}
+        totalSteps={2}
+        title="Was ist drin?"
+        onBack={() => updateBox(activeId, { error: null, draftName: '', draftPrice: '', draftCount: 1, step: 'overview' })}
+        onNext={addBoxItem}
+        nextLabel="Hinzufügen"
+      >
+        {errorBanner}
+        <div className="space-y-3">
+          <input
+            type="text"
+            autoFocus
+            value={active.draftName}
+            onChange={(e) => updateBox(activeId, { draftName: e.target.value, error: null })}
+            placeholder="Name (z.B. Croissant)"
+            style={DARK_BOX}
+            className={INPUT_CLS}
+          />
+          <StepperInput
+            value={active.draftPrice}
+            onChange={(v) => updateBox(activeId, { draftPrice: v, error: null })}
+            step={0.5}
+            min={0.5}
+            placeholder="Warenwert (z.B. 2)"
+          />
+          <QuantityPicker
+            value={active.draftCount}
+            onChange={(n) => updateBox(activeId, { draftCount: n, error: null })}
+          />
+        </div>
+      </WizardShell>
+      <LeftyNav
+        boxes={boxes}
+        activeId={activeId}
+        open={navOpen}
+        onToggle={() => setNavOpen(v => !v)}
+        onSwitchBox={(id) => { setActiveId(id); setNavOpen(false) }}
+        onDeleteBox={deleteBox}
+        onReset={resetAll}
+      />
+    </>
+  )
+
+  // ─── OVERVIEW ─────────────────────────────────────────────────────────────
+
+  if (active.step === 'overview') {
+    const warenwert = boxTotalPrice(active.items)
     const ersparnis = Math.round(warenwert * 0.7 * 100) / 100
     const verkaufspreis = Math.round(warenwert * 0.3 * 100) / 100
-    const festpreis = calcFestpreis(angebotType, verkaufspreis)
-    const underfilled = angebotType !== 'Mini' && boxItems.length > 0 && verkaufspreis < festpreis
-    const nextBoxType = LEFTY_ORDER[LEFTY_ORDER.indexOf(angebotType) + 1] as AngebotType | undefined
-    const prevBoxType = LEFTY_ORDER[LEFTY_ORDER.indexOf(angebotType) - 1] as AngebotType | undefined
-    const overfilled = !!nextBoxType && verkaufspreis >= LEFTY_PRICES[nextBoxType]
-
-    const handleProceed = () => {
-      if (underfilled) { setShowUnderfillPopup(true); return }
-      if (overfilled) { setShowOverfillPopup(true); return }
-      setStep('time')
-    }
 
     return (
-      <div className="relative min-h-dvh">
+      <>
         <WizardShell
           {...betriebBadge}
-          stepCount="2 / 3"
-          stepName="Übersicht"
-          currentStep={2}
-          totalSteps={3}
-          title={`Lefty ${angebotType}`}
-          titleNote={angebotType === 'Mini' ? '(bis 3 €)' : `(mind. ${festpreis} €)`}
-          hint={
-            boxItems.length > 0
-              ? `${boxItems.length} Artikel`
-              : 'Füge Artikel mit dem Button unten hinzu'
+          currentStep={1}
+          totalSteps={2}
+          title={active.items.length === 0 ? 'Lefty' : `Lefty ${active.angebotType}`}
+          titleNote={
+            active.angebotType && active.angebotType !== 'Mini' && LEFTY_PRICES[active.angebotType] > 0
+              ? `~ ${formatPrice(LEFTY_PRICES[active.angebotType])} €`
+              : undefined
           }
-          onBack={() => setStep('photo')}
-          onNext={handleProceed}
-          nextLabel="Weiter"
-          nextDisabled={boxItems.length === 0}
+          hint={
+            active.items.length > 0
+              ? `${active.items.length} Artikel`
+              : 'Füge Artikel mit dem Button oben hinzu'
+          }
+          onBack={
+            active.items.length > 0
+              ? () => updateBox(activeId, { step: 'add-item' })
+              : () => updateBox(activeId, { angebotType: null })
+          }
+          onNext={() => updateBox(activeId, { step: 'time' })}
+          showNext={false}
           extraAction={
-            <button
-              type="button"
-              onClick={() => { setError(null); setStep('add-item') }}
-              style={OUTLINE_DARK}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#F5A200] active:scale-[0.98]"
-            >
-              <span className="text-lg leading-none">+</span>
-              Nächstes Item
-            </button>
+            <div className="flex items-center justify-between gap-3">
+              {/* Neue Box — gleiche Quadrat-Größe wie Fortfahren */}
+              <button
+                type="button"
+                onClick={addNewBox}
+                aria-label="Neue Box anlegen"
+                className="relative flex aspect-square h-[72px] w-[72px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.97]"
+                style={{ backgroundColor: '#F5A200' }}
+              >
+                <img src={LeftyTueteSrc} alt="Lefty" className="h-7 w-auto" />
+                <span className="text-[8px] font-bold leading-tight text-cheapr-dark/70 text-center px-0.5">
+                  Weiteres Lefty
+                </span>
+                <span
+                  className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full text-sm font-black leading-none"
+                  style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                >+</span>
+              </button>
+
+              {/* Fortfahren — gleiche Quadrat-Größe */}
+              <button
+                type="button"
+                onClick={() => updateBox(activeId, { step: 'time' })}
+                disabled={active.items.length === 0}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                className={`flex aspect-square h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl transition-all hover:opacity-90 active:scale-[0.97] ${active.items.length === 0 ? 'opacity-25' : ''}`}
+              >
+                <svg width="22" height="22" viewBox="0 0 14 14" fill="none">
+                  <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
           }
         >
           {errorBanner}
 
-          {boxItems.length === 0 ? (
-            <div style={DARK_BOX} className="flex items-center justify-center rounded-2xl py-8">
-              <p className="text-sm font-medium opacity-60">Noch keine Artikel</p>
+          {active.items.length === 0 ? (
+            <div className="space-y-1.5">
+              {/* Add item — above empty state */}
+              <button
+                type="button"
+                onClick={openAddSheet}
+                aria-label="Artikel hinzufügen"
+                className="flex w-full items-center justify-center rounded-2xl bg-cheapr-dark/10 py-3.5 transition-all hover:bg-cheapr-dark/15 active:scale-[0.98]"
+              >
+                <span className="text-xl font-black text-cheapr-dark/50">+</span>
+              </button>
+              <div style={DARK_BOX} className="flex items-center justify-center rounded-2xl py-8">
+                <p className="text-sm font-medium opacity-60">Noch keine Artikel</p>
+              </div>
             </div>
           ) : (
-            <div className="space-y-2 mb-4">
+            <div className="space-y-1.5">
               <ul className="space-y-1.5">
-                {boxItems.map((item, i) => (
+                {active.items.map((item) => (
                   <li key={item.id} className="flex items-center gap-2 rounded-2xl bg-cheapr-dark/10">
-                    {/* Tappable main area → +1 */}
                     <button
                       type="button"
-                      onClick={() => setBoxItems((p) => p.map((x) => x.id === item.id ? { ...x, count: x.count + 1 } : x))}
+                      onClick={() => {
+                        const newItems = active.items.map(x =>
+                          x.id === item.id ? { ...x, count: x.count + 1 } : x
+                        )
+                        const warenwert2 = boxTotalPrice(newItems)
+                        const vp2 = Math.round(warenwert2 * 0.3 * 100) / 100
+                        updateBox(activeId, {
+                          items: newItems,
+                          angebotType: autoDetectBoxType(vp2),
+                        })
+                      }}
                       aria-label={`${item.name} hinzufügen`}
                       className="flex flex-1 items-center gap-3 px-4 py-3 text-left active:opacity-70"
                     >
@@ -328,21 +690,25 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                         {item.count}×
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-black text-cheapr-dark">
-                          {item.name}
-                        </p>
+                        <p className="truncate text-sm font-black text-cheapr-dark">{item.name}</p>
                       </div>
                       <span className="shrink-0 text-xs font-black text-cheapr-dark opacity-60">
                         {formatPrice(item.price * item.count)} €
                       </span>
                     </button>
-                    {/* Minus → decrement / remove at 0 */}
                     <button
                       type="button"
-                      onClick={() => setBoxItems((p) => {
-                        const updated = p.map((x) => x.id === item.id ? { ...x, count: x.count - 1 } : x)
-                        return updated.filter((x) => x.count > 0)
-                      })}
+                      onClick={() => {
+                        const newItems = active.items
+                          .map(x => x.id === item.id ? { ...x, count: x.count - 1 } : x)
+                          .filter(x => x.count > 0)
+                        const warenwert2 = boxTotalPrice(newItems)
+                        const vp2 = Math.round(warenwert2 * 0.3 * 100) / 100
+                        updateBox(activeId, {
+                          items: newItems,
+                          angebotType: newItems.length > 0 ? autoDetectBoxType(vp2) : active.angebotType,
+                        })
+                      }}
                       aria-label={`${item.name} entfernen`}
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mr-2 text-base font-black text-cheapr-dark opacity-30 transition-opacity hover:opacity-70 active:opacity-90"
                     >
@@ -352,8 +718,17 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                 ))}
               </ul>
 
-              {/* Dashboard */}
-              <div style={DARK_BOX} className="rounded-2xl px-4 py-4 space-y-2.5 mt-2">
+              {/* Add item — article style, centered, directly below list */}
+              <button
+                type="button"
+                onClick={openAddSheet}
+                aria-label="Artikel hinzufügen"
+                className="flex w-full items-center justify-center rounded-2xl bg-cheapr-dark/10 py-3.5 transition-all hover:bg-cheapr-dark/15 active:scale-[0.98]"
+              >
+                <span className="text-xl font-black text-cheapr-dark/50">+</span>
+              </button>
+
+              <div style={DARK_BOX} className="rounded-2xl px-4 py-4 space-y-2.5 mt-1">
                 <div className="flex justify-between text-sm font-bold opacity-50">
                   <span>Warenwert</span>
                   <span>{formatPrice(warenwert)} €</span>
@@ -372,126 +747,124 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
           )}
         </WizardShell>
 
-        {/* Underfill popup */}
-        {showUnderfillPopup && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5"
-            onClick={() => setShowUnderfillPopup(false)}
-          >
-            <div
-              style={{ backgroundColor: '#222222', color: '#F5A200' }}
-              className="w-full max-w-sm rounded-3xl p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="text-xl font-black leading-snug mb-1">Box zu leer ⚠️</p>
-              <p className="text-sm font-medium opacity-60 mb-1">
-                Der Verkaufspreis <strong className="opacity-100">{formatPrice(verkaufspreis)} €</strong> liegt unter dem Lefty-Festpreis von{' '}
-                <strong className="opacity-100">{festpreis} €</strong>.
-              </p>
-              <p className="text-[11px] font-medium opacity-40 mb-6">
-                Füge mehr Artikel hinzu oder wähle eine kleinere Box.
-              </p>
-              <div className="space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => { setShowUnderfillPopup(false); setStep('add-item') }}
-                  className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-90 active:scale-[0.98]"
-                  style={{ backgroundColor: '#F5A200', color: '#222222' }}
-                >
-                  + Weiteren Artikel hinzufügen
-                </button>
-                {prevBoxType && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAngebotType(prevBoxType)
-                      setShowUnderfillPopup(false)
-                    }}
-                    className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-80 active:scale-[0.98]"
-                    style={{ border: '2px solid rgba(245,162,0,0.4)' }}
-                  >
-                    Zu Lefty {prevBoxType} wechseln
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <LeftyNav
+          boxes={boxes}
+          activeId={activeId}
+          open={navOpen}
+          onToggle={() => setNavOpen(v => !v)}
+          onSwitchBox={(id) => { setActiveId(id); setNavOpen(false) }}
+          onDeleteBox={deleteBox}
+          onReset={resetAll}
+        />
 
-        {/* Overfill popup */}
-        {showOverfillPopup && nextBoxType && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5"
-            onClick={() => setShowOverfillPopup(false)}
-          >
+        {/* ── Add-item bottom sheet ──────────────────────────────────── */}
+        {sheetMounted && (
+          <>
+            {/* Backdrop */}
             <div
-              style={{ backgroundColor: '#222222', color: '#F5A200' }}
-              className="w-full max-w-sm rounded-3xl p-6 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="text-xl font-black leading-snug mb-1">Upgrade möglich 🚀</p>
-              <p className="text-sm font-medium opacity-60 mb-1">
-                Dein Warenwert reicht bereits für eine <strong className="opacity-100">Lefty {nextBoxType}</strong>.
-              </p>
-              <p className="text-[11px] font-medium opacity-40 mb-6">
-                Upgrade auf die größere Box – oder biete diese Box günstiger für Kunden an.
-              </p>
-              <div className="space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAngebotType(nextBoxType)
-                    setShowOverfillPopup(false)
-                  }}
-                  className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-90 active:scale-[0.98]"
-                  style={{ backgroundColor: '#F5A200', color: '#222222' }}
-                >
-                  Zu Lefty {nextBoxType} upgraden
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowOverfillPopup(false); setStep('time') }}
-                  className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-80 active:scale-[0.98]"
-                  style={{ border: '2px solid rgba(245,162,0,0.4)' }}
-                >
-                  Günstiger anbieten mit Lefty {angebotType}
-                </button>
+              className={`fixed inset-0 z-50 backdrop-blur-sm transition-opacity duration-300 ${sheetVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+              style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+              onClick={closeAddSheet}
+            />
+
+            {/* Sheet — full width on mobile, narrower centered on desktop */}
+            <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center pointer-events-none">
+              <div
+                className={`pointer-events-auto w-full max-w-md md:max-w-sm rounded-t-3xl px-5 pb-8 pt-3 transition-transform duration-300 ease-out ${sheetVisible ? 'translate-y-0' : 'translate-y-full'}`}
+                style={{ backgroundColor: '#F5A200', boxShadow: '0 -8px 40px rgba(0,0,0,0.2)' }}
+              >
+              {/* drag handle */}
+              <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-cheapr-dark/20" />
+
+              <h3 className="mb-4 text-xl font-black text-cheapr-dark">Was kommt rein?</h3>
+
+              {/* inline error */}
+              {active.error && (
+                <div className="mb-3 rounded-xl bg-red-500/20 px-4 py-2.5 text-center text-xs font-bold text-red-700">
+                  {active.error}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  autoFocus
+                  value={active.draftName}
+                  onChange={(e) => updateBox(activeId, { draftName: e.target.value, error: null })}
+                  placeholder="Name (z.B. Croissant)"
+                  style={DARK_BOX}
+                  className={INPUT_CLS}
+                />
+                <StepperInput
+                  value={active.draftPrice}
+                  onChange={(v) => updateBox(activeId, { draftPrice: v, error: null })}
+                  step={0.5}
+                  min={0.5}
+                  placeholder="Warenwert (z.B. 2)"
+                />
+                <QuantityPicker
+                  value={active.draftCount}
+                  onChange={(n) => updateBox(activeId, { draftCount: n, error: null })}
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => { if (addBoxItem()) closeAddSheet() }}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98]"
+              >
+                Hinzufügen
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 2.5V11.5M2.5 7H11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+              </button>
               </div>
             </div>
-          </div>
+          </>
         )}
-      </div>
+      </>
     )
   }
 
-  // ─── TIME ─────────────────────────────────────────────────
+  // ─── TIME ─────────────────────────────────────────────────────────────────
 
   return (
-    <WizardShell
-      {...betriebBadge}
-      stepCount="3 / 3"
-      stepName="Abholzeit"
-      currentStep={3}
-      totalSteps={3}
-      title="Bis wann abholbar?"
-      onBack={() => setStep('overview')}
-      onNext={() => {
-        if (!abholzeit) { setError('Bitte eine Abholzeit angeben.'); return }
-        setError(null)
-        submitAngebot()
-      }}
-      nextLabel={loading ? 'Wird gesendet…' : 'Absenden'}
-      nextDisabled={loading}
-    >
-      {errorBanner}
-      <input
-        type="time"
-        value={abholzeit}
-        onChange={(e) => { setAbholzeit(e.target.value); setError(null) }}
-        style={DARK_BOX}
-        className={TIME_CLS}
+    <>
+      <WizardShell
+        {...betriebBadge}
+        currentStep={2}
+        totalSteps={2}
+        title="Bis wann abholbar?"
+        onBack={() => updateBox(activeId, { step: 'overview' })}
+        onNext={() => {
+          if (!active.abholzeit) { updateBox(activeId, { error: 'Bitte eine Abholzeit angeben.' }); return }
+          updateBox(activeId, { error: null })
+          submitActiveBox()
+        }}
+        nextLabel={active.loading ? 'Wird gesendet…' : 'Absenden'}
+        nextDisabled={active.loading}
+      >
+        {errorBanner}
+        <input
+          type="time"
+          value={active.abholzeit}
+          onChange={(e) => updateBox(activeId, { abholzeit: e.target.value, error: null })}
+          style={DARK_BOX}
+          className={TIME_CLS}
+        />
+      </WizardShell>
+
+      <LeftyNav
+        boxes={boxes}
+        activeId={activeId}
+        open={navOpen}
+        onToggle={() => setNavOpen(v => !v)}
+        onSwitchBox={(id) => { setActiveId(id); setNavOpen(false) }}
+        onDeleteBox={deleteBox}
+        onReset={resetAll}
       />
-    </WizardShell>
+    </>
   )
 }
 

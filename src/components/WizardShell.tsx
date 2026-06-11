@@ -3,8 +3,6 @@ import CheaprLogo from '../CheaprLogo.svg'
 import BetriebBadge from './BetriebBadge'
 
 interface WizardShellProps {
-  stepCount?: string
-  stepName?: string
   totalSteps?: number
   currentStep?: number
   betriebCode?: string
@@ -24,8 +22,6 @@ interface WizardShellProps {
 }
 
 export default function WizardShell({
-  stepCount,
-  stepName,
   totalSteps,
   currentStep,
   betriebCode,
@@ -83,18 +79,7 @@ export default function WizardShell({
           )}
         </div>
 
-        {stepCount ? (
-          <div className="text-right">
-            <p className="text-[11px] font-bold tabular-nums text-cheapr-dark/35">{stepCount}</p>
-            {stepName && (
-              <p className="text-[10px] font-bold uppercase tracking-widest text-cheapr-dark/50">
-                {stepName}
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="h-9 w-9" />
-        )}
+        <div className="h-9 w-9" />
       </div>
 
       <div className="flex flex-1 flex-col justify-center px-5 py-4">
@@ -116,20 +101,36 @@ export default function WizardShell({
         <div className="mx-auto w-full max-w-md space-y-2.5">
           {extraAction}
           {showNext && onNext && (
-            <button
-              type="button"
-              onClick={onNext}
-              disabled={nextDisabled}
-              style={{ backgroundColor: '#222222', color: '#F5A200' }}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-25"
-            >
-              {nextLabel}
-              {!nextDisabled && (
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </button>
+            nextLabel ? (
+              <button
+                type="button"
+                onClick={onNext}
+                disabled={nextDisabled}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-25"
+              >
+                {nextLabel}
+                {!nextDisabled && (
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            ) : (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={onNext}
+                  disabled={nextDisabled}
+                  style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                  className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl transition-all hover:opacity-90 active:scale-[0.98] ${nextDisabled ? 'opacity-25' : ''}`}
+                >
+                  <svg width="18" height="18" viewBox="0 0 14 14" fill="none">
+                    <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            )
           )}
         </div>
       </div>

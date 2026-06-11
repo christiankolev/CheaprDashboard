@@ -3,7 +3,6 @@ interface StepperInputProps {
   onChange: (value: string) => void
   step?: number
   min?: number
-  suffix?: string
   placeholder?: string
 }
 
@@ -20,15 +19,17 @@ const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
 export const OUTLINE_DARK = { border: '2px solid #222222', color: '#222222', backgroundColor: 'transparent' } as const
 
 const BTN_CLS =
-  'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl font-black transition-all hover:opacity-80 active:scale-95'
+  'flex h-[54px] w-12 shrink-0 items-center justify-center rounded-2xl text-2xl font-black transition-all hover:opacity-80 active:scale-95'
+
+const INPUT_INNER_CLS =
+  'w-full rounded-2xl px-4 py-4 text-lg font-bold placeholder:font-medium placeholder:opacity-40 focus:outline-none'
 
 export default function StepperInput({
   value,
   onChange,
   step = 0.5,
   min = 0,
-  suffix = '€',
-  placeholder = '0',
+  placeholder = 'Warenwert (z.B. 2)',
 }: StepperInputProps) {
   const adjust = (delta: number) => {
     const current = parseDecimal(value)
@@ -43,23 +44,15 @@ export default function StepperInput({
         −
       </button>
 
-      <div className="relative flex-1">
-        <span
-          className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black"
-          style={{ color: '#F5A200' }}
-        >
-          {suffix}
-        </span>
-        <input
-          type="text"
-          inputMode="decimal"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          style={DARK_BOX}
-          className="w-full rounded-xl py-3.5 pl-10 pr-4 text-center text-2xl font-black placeholder:opacity-40 focus:outline-none"
-        />
-      </div>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={DARK_BOX}
+        className={`flex-1 ${INPUT_INNER_CLS}`}
+      />
 
       <button type="button" onClick={() => adjust(step)} aria-label="Mehr" className={BTN_CLS} style={DARK_BOX}>
         +
