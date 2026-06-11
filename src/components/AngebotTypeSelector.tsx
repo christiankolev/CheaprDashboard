@@ -51,7 +51,7 @@ export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode
           Neues Angebot
         </p>
         <h1 className="mb-6 text-[2.2rem] font-black leading-tight tracking-tight text-cheapr-dark">
-          Füge ein Lefty hinzu!
+          Füge Leftys hinzu!
         </h1>
 
         <label htmlFor="lefty-anzahl" className="mb-3 block text-sm font-bold text-cheapr-dark/60">

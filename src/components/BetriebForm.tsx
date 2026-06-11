@@ -363,7 +363,10 @@ function SwipeToDelete({
 
   return (
     <div ref={innerRef} className="relative scroll-mt-24 overflow-hidden rounded-2xl">
-      <div className="absolute inset-0 flex items-center justify-end bg-red-500 px-6" aria-hidden>
+      <div
+        className={`absolute inset-0 flex items-center justify-end bg-red-500 px-6 transition-opacity duration-150 ${offset > 0 ? 'opacity-100' : 'opacity-0'}`}
+        aria-hidden
+      >
         <TrashIcon className="text-white" />
       </div>
       <div
@@ -390,7 +393,7 @@ interface LeftyDropdownSectionProps {
   onToggle: () => void
   onAdd: () => void
   onCopy: () => void
-  onInsert: () => void
+  onInsert?: () => void
   updateBox: (id: string, updates: Partial<BoxState>) => void
 }
 
@@ -835,6 +838,18 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     setNavOpen(false)
   }
 
+  const goToLeftySelector = () => {
+    const freshBox = createEmptyBox()
+    setBoxes([freshBox])
+    setActiveId(freshBox.id)
+    setExpandedBoxIds(new Set())
+    setNavOpen(false)
+    setSubmitError(null)
+  }
+
+  const hasInsertSources = (targetId: string) =>
+    getSessionBoxes(boxes).some(b => b.id !== targetId && b.items.length > 0)
+
   const deleteBox = (id: string) => {
     const remaining = boxes.filter(b => b.id !== id)
     if (remaining.length === 0) {
@@ -1178,7 +1193,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
             <div className="flex items-center justify-between px-5 pb-1 pt-4">
               <button
                 type="button"
-                onClick={() => updateBox(activeId, { angebotType: null })}
+                onClick={goToLeftySelector}
                 aria-label="Zurück"
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-cheapr-dark/10 text-cheapr-dark/50 transition-colors hover:bg-cheapr-dark/15"
               >
@@ -1221,7 +1236,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                       onToggle={() => toggleBoxExpanded(box.id)}
                       onAdd={() => openAddSheet(box.id)}
                       onCopy={() => copyBox(box.id)}
-                      onInsert={() => openInsertPicker(box.id)}
+                      onInsert={hasInsertSources(box.id) ? () => openInsertPicker(box.id) : undefined}
                       updateBox={updateBox}
                     />
                   </SwipeToDelete>
@@ -1351,11 +1366,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
               ? `${active.items.length} Artikel`
               : 'Füge Artikel mit dem Button oben hinzu'
           }
-          onBack={
-            active.items.length > 0
-              ? () => updateBox(activeId, { step: 'add-item' })
-              : () => updateBox(activeId, { angebotType: null })
-          }
+          onBack={goToLeftySelector}
           onNext={() => updateBox(activeId, { step: 'time' })}
           showNext={false}
           extraAction={
@@ -1406,10 +1417,9 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
               >
                 <span className="text-xl font-black text-cheapr-dark/50">+</span>
               </button>
-              <LeftyEmptySummary onInsert={() => openInsertPicker(activeId)} />
+              <LeftyEmptySummary onInsert={hasInsertSources(activeId) ? () => openInsertPicker(activeId) : undefined} />
             </div>
           ) : (
-            <SwipeToDelete onDelete={() => deleteBox(activeId)}>
             <div className="space-y-1.5">
               <ul className="space-y-1.5">
                 {active.items.map((item) => (
@@ -1479,7 +1489,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                 onCopy={() => copyBox(activeId)}
               />
             </div>
-            </SwipeToDelete>
           )}
         </WizardShell>
 
