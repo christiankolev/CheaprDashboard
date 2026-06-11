@@ -44,15 +44,24 @@ export default function StepperInput({
         −
       </button>
 
-      <input
-        type="text"
-        inputMode="decimal"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        style={DARK_BOX}
-        className={`flex-1 ${INPUT_INNER_CLS}`}
-      />
+      <div className="relative flex-1">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => onChange(e.target.value.replace(/[^\d.,]/g, ''))}
+          placeholder={placeholder}
+          style={DARK_BOX}
+          className={`w-full ${INPUT_INNER_CLS} ${value ? 'pr-9' : ''}`}
+        />
+        <span
+          aria-hidden
+          className={`pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-lg font-bold transition-opacity duration-150 ${value ? 'opacity-70' : 'opacity-0'}`}
+          style={{ color: '#F5A200' }}
+        >
+          €
+        </span>
+      </div>
 
       <button type="button" onClick={() => adjust(step)} aria-label="Mehr" className={BTN_CLS} style={DARK_BOX}>
         +

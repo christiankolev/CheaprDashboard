@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import LeftyTuete from '../../leftytüte.svg'
 import CheaprLogo from '../CheaprLogo.svg'
 import BetriebBadge from './BetriebBadge'
@@ -14,13 +15,22 @@ export const LEFTY_OPTIONS: { type: AngebotType; warenwert: number }[] = [
 ]
 
 interface AngebotTypeSelectorProps {
-  onSelect: (type: AngebotType) => void
+  onSelect: (type: AngebotType, count: number) => void
   betriebName?: string
   betriebCode?: string
   betriebBild?: string
 }
 
 export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode, betriebBild }: AngebotTypeSelectorProps) {
+  const countRef = useRef<HTMLInputElement>(null)
+  const [count, setCount] = useState(1)
+
+  const handleSubmit = () => {
+    const raw = countRef.current?.value ?? String(count)
+    const n = Math.max(1, Math.min(10, parseInt(raw, 10) || 1))
+    onSelect('Mini', n)
+  }
+
   return (
     <div className="flex min-h-dvh flex-col bg-[#F5A200] px-5 py-6">
 
@@ -40,13 +50,27 @@ export default function AngebotTypeSelector({ onSelect, betriebName, betriebCode
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-cheapr-dark/40">
           Neues Angebot
         </p>
-        <h1 className="mb-8 text-[2.2rem] font-black leading-tight tracking-tight text-cheapr-dark">
+        <h1 className="mb-6 text-[2.2rem] font-black leading-tight tracking-tight text-cheapr-dark">
           Füge ein Lefty hinzu!
         </h1>
 
+        <label htmlFor="lefty-anzahl" className="mb-3 block text-sm font-bold text-cheapr-dark/60">
+          Wie viele Leftys?
+        </label>
+        <input
+          ref={countRef}
+          id="lefty-anzahl"
+          type="number"
+          min={1}
+          max={10}
+          value={count}
+          onChange={(e) => setCount(Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1)))}
+          className="mb-4 w-full rounded-2xl border-2 border-cheapr-dark bg-white px-4 py-3 text-center text-2xl font-black text-cheapr-dark focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-auto [&::-webkit-outer-spin-button]:appearance-auto"
+        />
+
         <button
           type="button"
-          onClick={() => onSelect('Mini')}
+          onClick={handleSubmit}
           style={{ backgroundColor: '#222222' }}
           className="relative flex w-full items-center justify-center rounded-3xl shadow-lg py-10 px-6 transition-all hover:opacity-90 active:scale-[0.98]"
         >
