@@ -10,7 +10,9 @@ interface WizardShellProps {
   betriebCode?: string
   betriebName?: string
   betriebBild?: string
+  betriebSubtitle?: string
   title: string
+  titleNote?: string
   hint?: string
   children: ReactNode
   onBack?: () => void
@@ -30,6 +32,7 @@ export default function WizardShell({
   betriebName,
   betriebBild,
   title,
+  titleNote,
   hint,
   children,
   onBack,
@@ -70,13 +73,15 @@ export default function WizardShell({
           <div className="h-9 w-9" />
         )}
 
-        {betriebCode && betriebName && (
-          <BetriebBadge
-            label={`${betriebCode} · ${betriebName}`}
-            image={betriebBild}
-            imageAlt={betriebName}
-          />
-        )}
+        <div className="flex items-center">
+          {betriebCode && betriebName && (
+            <BetriebBadge
+              label={`${betriebCode} · ${betriebName}`}
+              image={betriebBild}
+              imageAlt={betriebName}
+            />
+          )}
+        </div>
 
         {stepCount ? (
           <div className="text-right">
@@ -94,8 +99,11 @@ export default function WizardShell({
 
       <div className="flex flex-1 flex-col justify-center px-5 py-4">
         <div className="mx-auto w-full max-w-md">
-          <h2 className="text-[1.75rem] font-black leading-tight tracking-tight text-cheapr-dark">
+          <h2 className="flex flex-wrap items-baseline gap-x-2 text-[1.75rem] font-black leading-tight tracking-tight text-cheapr-dark">
             {title}
+            {titleNote && (
+              <span className="text-[1rem] font-bold opacity-35">{titleNote}</span>
+            )}
           </h2>
           {hint && (
             <p className="mt-1.5 text-sm font-medium text-cheapr-dark/50">{hint}</p>

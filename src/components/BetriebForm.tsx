@@ -1,9 +1,8 @@
 import { useRef, useState } from 'react'
 import type { Betrieb } from '../config/betriebe'
-import { fileToBase64, generatePost } from '../lib/openai'
 import { sendAngebotToTelegram } from '../lib/telegram'
-import AngebotTypeSelector, { type AngebotType } from './AngebotTypeSelector'
-import StepperInput, { OUTLINE_DARK, QuantityPicker, StepperInteger } from './StepperInput'
+import AngebotTypeSelector, { LEFTY_PRICES, type AngebotType } from './AngebotTypeSelector'
+import StepperInput, { OUTLINE_DARK, QuantityPicker } from './StepperInput'
 import Success from './Success'
 import WizardShell from './WizardShell'
 
@@ -18,11 +17,7 @@ interface BoxItem {
   count: number
 }
 
-type ItemStep = 'name' | 'price' | 'photo' | 'time' | 'quantity'
-type BoxStep = 'overview' | 'add-item' | 'photo' | 'time' | 'quantity'
-
-const ITEM_TOTAL = 5
-const BOX_TOTAL = 4
+type LeftyStep = 'photo' | 'add-item' | 'overview' | 'time'
 
 function parsePrice(value: string): number {
   return parseFloat(value.replace(',', '.'))
@@ -32,15 +27,43 @@ function formatPrice(num: number): string {
   return num % 1 === 0 ? String(num) : num.toFixed(2).replace('.', ',')
 }
 
-function boxGerichtName(items: BoxItem[]): string {
-  return `Box: ${items.map((i) => {
-    const qty = i.count > 1 ? `${i.count}x ` : ''
-    return `${qty}${i.name} (${formatPrice(i.price)}€)`
-  }).join(', ')}`
-}
-
 function boxTotalPrice(items: BoxItem[]): number {
   return items.reduce((sum, i) => sum + i.price * i.count, 0)
+}
+
+function calcFestpreis(size: AngebotType, verkaufspreis: number): number {
+  return size === 'Mini' ? Math.min(verkaufspreis, 3) : LEFTY_PRICES[size]
+}
+
+function buildTelegramCaption(
+  size: AngebotType,
+  items: BoxItem[],
+  abholzeit: string,
+  betrieb: Betrieb,
+): string {
+  const warenwert = boxTotalPrice(items)
+  const verkaufspreis = Math.round(warenwert * 0.3 * 100) / 100
+  const festpreis = calcFestpreis(size, verkaufspreis)
+  const itemLines = items
+    .map((i) => {
+      const qty = i.count > 1 ? `${i.count}× ` : ''
+      return `• ${qty}${i.name} (${formatPrice(i.price * i.count)} €)`
+    })
+    .join('\n')
+
+  return [
+    `📦 ${betrieb.code} – ${betrieb.name}`,
+    `🛍️ Lefty ${size}`,
+    ``,
+    itemLines,
+    ``,
+    `💰 ${formatPrice(festpreis)} €  (statt ${formatPrice(warenwert)} €)`,
+    `🕕 Abholung: bis ${abholzeit} Uhr`,
+    `📍 ${betrieb.adresse}`,
+    ``,
+    `➡️ Interesse? Schreib mir: „${betrieb.code} – Lefty ${size}"`,
+    `⚡️ First come, first served`,
+  ].join('\n')
 }
 
 const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
@@ -53,13 +76,9 @@ const TIME_CLS =
 
 export default function BetriebForm({ betrieb }: BetriebFormProps) {
   const [angebotType, setAngebotType] = useState<AngebotType | null>(null)
-  const [itemStep, setItemStep] = useState<ItemStep>('name')
-  const [boxStep, setBoxStep] = useState<BoxStep>('overview')
+  const [step, setStep] = useState<LeftyStep>('photo')
 
-  const [produktname, setProduktname] = useState('')
-  const [originalpreis, setOriginalpreis] = useState('')
   const [abholzeit, setAbholzeit] = useState('')
-  const [portionen, setPortionen] = useState(1)
   const [foto, setFoto] = useState<File | null>(null)
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
 
@@ -68,31 +87,29 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
   const [draftPrice, setDraftPrice] = useState('')
   const [draftCount, setDraftCount] = useState(1)
 
+  const [showUnderfillPopup, setShowUnderfillPopup] = useState(false)
+  const [showOverfillPopup, setShowOverfillPopup] = useState(false)
+
   const [loading, setLoading] = useState(false)
-  const [generatingPost, setGeneratingPost] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [generatedPost, setGeneratedPost] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const resetForm = () => {
     setAngebotType(null)
-    setItemStep('name')
-    setBoxStep('overview')
-    setProduktname('')
-    setOriginalpreis('')
+    setStep('photo')
     setAbholzeit('')
-    setPortionen(1)
     setFoto(null)
     setFotoPreview(null)
     setBoxItems([])
     setDraftName('')
     setDraftPrice('')
     setDraftCount(1)
+    setShowUnderfillPopup(false)
+    setShowOverfillPopup(false)
     setError(null)
     setSuccess(false)
-    setGeneratedPost('')
-    setGeneratingPost(false)
+    setLoading(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -102,44 +119,24 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     setFotoPreview(file ? URL.createObjectURL(file) : null)
   }
 
-  const submitAngebot = async (gerichtName: string, preis: number, anzahl: number) => {
+  const submitAngebot = async () => {
     if (!foto) { setError('Bitte ein Foto hochladen.'); return }
     if (!abholzeit) { setError('Bitte eine Abholzeit angeben.'); return }
+    if (!angebotType) return
 
     setError(null)
     setLoading(true)
-    setGeneratingPost(true)
 
     try {
-      const { base64, mimeType } = await fileToBase64(foto)
-      const post = await generatePost({
-        betriebCode: betrieb.code,
-        betriebName: betrieb.name,
-        adresse: betrieb.adresse,
-        gerichtName,
-        originalpreis: preis,
-        abholzeit,
-        bildBase64: base64,
-        portionen: anzahl,
-        mimeType,
-      })
-      setGeneratingPost(false)
-      await sendAngebotToTelegram(foto, post)
-      setGeneratedPost(post)
+      const caption = buildTelegramCaption(angebotType, boxItems, abholzeit, betrieb)
+      await sendAngebotToTelegram(foto, caption)
       setSuccess(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unbekannter Fehler beim Absenden.')
     } finally {
       setLoading(false)
-      setGeneratingPost(false)
     }
   }
-
-  const handleItemSubmit = () =>
-    submitAngebot(produktname.trim(), parsePrice(originalpreis), portionen)
-
-  const handleBoxSubmit = () =>
-    submitAngebot(boxGerichtName(boxItems), boxTotalPrice(boxItems), portionen)
 
   const addBoxItem = () => {
     const price = parsePrice(draftPrice)
@@ -153,17 +150,19 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     setDraftName('')
     setDraftPrice('')
     setDraftCount(1)
-    setBoxStep('overview')
+    setStep('overview')
   }
 
-  if (success && generatedPost) {
-    return <Success generatedPost={generatedPost} onNeuesAngebot={resetForm} />
+  if (success) {
+    return <Success onNeuesAngebot={resetForm} />
   }
+
+  const LEFTY_ORDER: AngebotType[] = ['Mini', 'S', 'M', 'L']
 
   if (!angebotType) {
     return (
       <AngebotTypeSelector
-        onSelect={setAngebotType}
+        onSelect={(type) => { setAngebotType(type); setStep('photo') }}
         betriebCode={betrieb.code}
         betriebName={betrieb.name}
         betriebBild={betrieb.bild}
@@ -175,6 +174,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     betriebCode: betrieb.code,
     betriebName: betrieb.name,
     betriebBild: betrieb.bild,
+    betriebSubtitle: `Lefty ${angebotType}`,
   }
 
   const errorBanner = error ? (
@@ -183,212 +183,53 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     </div>
   ) : null
 
-  const loadingLabel = generatingPost
-    ? 'Post wird generiert…'
-    : loading
-      ? 'Wird gesendet…'
-      : 'Absenden'
+  // ─── PHOTO ────────────────────────────────────────────────
 
-  // ─── ITEM FLOW ────────────────────────────────────────────
-
-  if (angebotType === 'item') {
-    const itemStepMap: Record<ItemStep, number> = {
-      name: 1, price: 2, photo: 3, time: 4, quantity: 5,
-    }
-    const cur = itemStepMap[itemStep]
-
-    if (itemStep === 'name') return (
-      <WizardShell
-        {...betriebBadge}
-        stepCount={`${cur} / ${ITEM_TOTAL}`}
-        stepName="Name"
-        currentStep={cur}
-        totalSteps={ITEM_TOTAL}
-        title="Wie heißt das Produkt?"
-        onBack={() => setAngebotType(null)}
-        onNext={() => {
-          if (!produktname.trim()) { setError('Bitte einen Namen eingeben.'); return }
-          setError(null); setItemStep('price')
-        }}
-      >
-        {errorBanner}
-          <input
-            type="text"
-            autoFocus
-            value={produktname}
-            onChange={(e) => { setProduktname(e.target.value); setError(null) }}
-            placeholder="z.B. Gemischte Bäckertüte"
-            style={DARK_BOX}
-            className={INPUT_CLS}
-          />
-      </WizardShell>
-    )
-
-    if (itemStep === 'price') return (
-      <WizardShell
-        {...betriebBadge}
-        stepCount={`${cur} / ${ITEM_TOTAL}`}
-        stepName="Preis"
-        currentStep={cur}
-        totalSteps={ITEM_TOTAL}
-        title="Was kostet es original?"
-        onBack={() => setItemStep('name')}
-        onNext={() => {
-          const preis = parsePrice(originalpreis)
-          if (isNaN(preis) || preis <= 0) { setError('Bitte einen gültigen Preis eingeben.'); return }
-          setError(null); setItemStep('photo')
-        }}
-      >
-        {errorBanner}
-        <StepperInput
-          value={originalpreis}
-          onChange={(v) => { setOriginalpreis(v); setError(null) }}
-          step={0.5} min={0.5} suffix="€" placeholder="0"
-        />
-      </WizardShell>
-    )
-
-    if (itemStep === 'photo') return (
-      <WizardShell
-        {...betriebBadge}
-        stepCount={`${cur} / ${ITEM_TOTAL}`}
-        stepName="Foto"
-        currentStep={cur}
-        totalSteps={ITEM_TOTAL}
-        title="Foto hochladen"
-        hint="Ein kurzes Bild reicht völlig"
-        onBack={() => setItemStep('price')}
-        onNext={() => {
-          if (!foto) { setError('Bitte ein Foto hochladen.'); return }
-          setError(null); setItemStep('time')
-        }}
-      >
-        {errorBanner}
-        <PhotoPicker fotoPreview={fotoPreview} onClick={() => fileInputRef.current?.click()} />
-        <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
-          onChange={(e) => handleFotoChange(e.target.files?.[0] ?? null)} />
-      </WizardShell>
-    )
-
-    if (itemStep === 'time') return (
-      <WizardShell
-        {...betriebBadge}
-        stepCount={`${cur} / ${ITEM_TOTAL}`}
-        stepName="Abholzeit"
-        currentStep={cur}
-        totalSteps={ITEM_TOTAL}
-        title="Bis wann abholbar?"
-        onBack={() => setItemStep('photo')}
-        onNext={() => {
-          if (!abholzeit) { setError('Bitte eine Abholzeit angeben.'); return }
-          setError(null); setItemStep('quantity')
-        }}
-      >
-        {errorBanner}
-        <input type="time" value={abholzeit}
-          onChange={(e) => { setAbholzeit(e.target.value); setError(null) }}
-          style={DARK_BOX}
-          className={TIME_CLS} />
-      </WizardShell>
-    )
-
-    return (
-      <WizardShell
-        {...betriebBadge}
-        stepCount={`${cur} / ${ITEM_TOTAL}`}
-        stepName="Anzahl"
-        currentStep={cur}
-        totalSteps={ITEM_TOTAL}
-        title="Wie viele davon?"
-        onBack={() => setItemStep('time')}
-        onNext={handleItemSubmit}
-        nextLabel={loadingLabel}
-        nextDisabled={loading}
-      >
-        {errorBanner}
-        <StepperInteger value={portionen} onChange={setPortionen} min={1} />
-      </WizardShell>
-    )
-  }
-
-  // ─── BOX FLOW ─────────────────────────────────────────────
-
-  const boxStepMap: Record<BoxStep, number> = {
-    overview: 0, 'add-item': 0, photo: 1, time: 2, quantity: 3,
-  }
-  const bCur = boxStepMap[boxStep]
-
-  if (boxStep === 'overview') {
-    const total = boxTotalPrice(boxItems)
-    return (
-      <WizardShell
-        {...betriebBadge}
-        title="Deine Box"
-        hint={boxItems.length > 0 ? `${boxItems.length} Item${boxItems.length > 1 ? 's' : ''} · Gesamt ${formatPrice(total)} €` : 'Füge Items mit dem Button unten hinzu'}
-        onBack={() => setAngebotType(null)}
-        onNext={() => setBoxStep('photo')}
-        nextLabel="Box abschließen"
-        nextDisabled={boxItems.length === 0}
-        extraAction={
-          <button
-            type="button"
-            onClick={() => { setError(null); setBoxStep('add-item') }}
-            style={OUTLINE_DARK}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#F5A200] active:scale-[0.98]"
-          >
-            <span className="text-lg leading-none">+</span>
-            Neues Item
-          </button>
-        }
-      >
-        {errorBanner}
-        {boxItems.length === 0 ? (
-          <div
-            style={DARK_BOX}
-            className="flex items-center justify-center rounded-2xl py-8"
-          >
-            <p className="text-sm font-medium opacity-60">Noch keine Items</p>
-          </div>
-        ) : (
-          <ul className="space-y-2">
-            {boxItems.map((item, i) => (
-              <li
-                key={item.id}
-                style={DARK_BOX}
-                className="flex items-center gap-3 rounded-2xl px-4 py-3.5"
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-black opacity-40">
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-black">
-                    {item.count > 1 ? `${item.count}× ` : ''}{item.name}
-                  </p>
-                </div>
-                <span className="shrink-0 rounded-full px-2.5 py-1 text-xs font-black opacity-70">
-                  {formatPrice(item.price)} €
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setBoxItems((p) => p.filter((x) => x.id !== item.id))}
-                  aria-label={`${item.name} entfernen`}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold opacity-40 transition-opacity hover:opacity-80"
-                >
-                  ✕
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </WizardShell>
-    )
-  }
-
-  if (boxStep === 'add-item') return (
+  if (step === 'photo') return (
     <WizardShell
       {...betriebBadge}
-      title="Was kommt rein?"
-      onBack={() => { setError(null); setDraftName(''); setDraftPrice(''); setDraftCount(1); setBoxStep('overview') }}
+      stepCount="1 / 3"
+      stepName="Foto"
+      currentStep={1}
+      totalSteps={3}
+      title="Foto machen"
+      hint="Knips ein Bild der übrigen Sachen"
+      onBack={() => setAngebotType(null)}
+      onNext={() => {
+        if (!foto) { setError('Bitte ein Foto hochladen.'); return }
+        setError(null); setStep('add-item')
+      }}
+    >
+      {errorBanner}
+      <PhotoPicker fotoPreview={fotoPreview} onClick={() => fileInputRef.current?.click()} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => handleFotoChange(e.target.files?.[0] ?? null)}
+      />
+    </WizardShell>
+  )
+
+  // ─── ADD ITEM ─────────────────────────────────────────────
+
+  if (step === 'add-item') return (
+    <WizardShell
+      {...betriebBadge}
+      stepCount="2 / 3"
+      stepName="Artikel"
+      currentStep={2}
+      totalSteps={3}
+      title="Was ist drin?"
+      onBack={() => {
+        setError(null)
+        setDraftName('')
+        setDraftPrice('')
+        setDraftCount(1)
+        setStep(boxItems.length > 0 ? 'overview' : 'photo')
+      }}
       onNext={addBoxItem}
       nextLabel="Hinzufügen"
     >
@@ -416,65 +257,240 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     </WizardShell>
   )
 
-  if (boxStep === 'photo') return (
-    <WizardShell
-      {...betriebBadge}
-      stepCount={`${bCur} / ${BOX_TOTAL}`}
-      stepName="Foto"
-      currentStep={bCur}
-      totalSteps={BOX_TOTAL}
-      title="Foto der Box"
-      hint="Ein grobes Bild reicht"
-      onBack={() => setBoxStep('overview')}
-      onNext={() => {
-        if (!foto) { setError('Bitte ein Foto hochladen.'); return }
-        setError(null); setBoxStep('time')
-      }}
-    >
-      {errorBanner}
-      <PhotoPicker fotoPreview={fotoPreview} onClick={() => fileInputRef.current?.click()} />
-      <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
-        onChange={(e) => handleFotoChange(e.target.files?.[0] ?? null)} />
-    </WizardShell>
-  )
+  // ─── OVERVIEW / DASHBOARD ─────────────────────────────────
 
-  if (boxStep === 'time') return (
-    <WizardShell
-      {...betriebBadge}
-      stepCount={`${bCur} / ${BOX_TOTAL}`}
-      stepName="Abholzeit"
-      currentStep={bCur}
-      totalSteps={BOX_TOTAL}
-      title="Bis wann abholbar?"
-      onBack={() => setBoxStep('photo')}
-      onNext={() => {
-        if (!abholzeit) { setError('Bitte eine Abholzeit angeben.'); return }
-        setError(null); setBoxStep('quantity')
-      }}
-    >
-      {errorBanner}
-      <input type="time" value={abholzeit}
-        onChange={(e) => { setAbholzeit(e.target.value); setError(null) }}
-        style={DARK_BOX}
-        className={TIME_CLS} />
-    </WizardShell>
-  )
+  if (step === 'overview') {
+    const warenwert = boxTotalPrice(boxItems)
+    const ersparnis = Math.round(warenwert * 0.7 * 100) / 100
+    const verkaufspreis = Math.round(warenwert * 0.3 * 100) / 100
+    const festpreis = calcFestpreis(angebotType, verkaufspreis)
+    const underfilled = angebotType !== 'Mini' && boxItems.length > 0 && verkaufspreis < festpreis
+    const nextBoxType = LEFTY_ORDER[LEFTY_ORDER.indexOf(angebotType) + 1] as AngebotType | undefined
+    const prevBoxType = LEFTY_ORDER[LEFTY_ORDER.indexOf(angebotType) - 1] as AngebotType | undefined
+    const overfilled = !!nextBoxType && verkaufspreis >= LEFTY_PRICES[nextBoxType]
+
+    const handleProceed = () => {
+      if (underfilled) { setShowUnderfillPopup(true); return }
+      if (overfilled) { setShowOverfillPopup(true); return }
+      setStep('time')
+    }
+
+    return (
+      <div className="relative min-h-dvh">
+        <WizardShell
+          {...betriebBadge}
+          stepCount="2 / 3"
+          stepName="Übersicht"
+          currentStep={2}
+          totalSteps={3}
+          title={`Lefty ${angebotType}`}
+          titleNote={angebotType === 'Mini' ? '(bis 3 €)' : `(mind. ${festpreis} €)`}
+          hint={
+            boxItems.length > 0
+              ? `${boxItems.length} Artikel`
+              : 'Füge Artikel mit dem Button unten hinzu'
+          }
+          onBack={() => setStep('photo')}
+          onNext={handleProceed}
+          nextLabel="Weiter"
+          nextDisabled={boxItems.length === 0}
+          extraAction={
+            <button
+              type="button"
+              onClick={() => { setError(null); setStep('add-item') }}
+              style={OUTLINE_DARK}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:bg-[#222222] hover:text-[#F5A200] active:scale-[0.98]"
+            >
+              <span className="text-lg leading-none">+</span>
+              Nächstes Item
+            </button>
+          }
+        >
+          {errorBanner}
+
+          {boxItems.length === 0 ? (
+            <div style={DARK_BOX} className="flex items-center justify-center rounded-2xl py-8">
+              <p className="text-sm font-medium opacity-60">Noch keine Artikel</p>
+            </div>
+          ) : (
+            <div className="space-y-2 mb-4">
+              <ul className="space-y-1.5">
+                {boxItems.map((item, i) => (
+                  <li key={item.id} className="flex items-center gap-2 rounded-2xl bg-cheapr-dark/10">
+                    {/* Tappable main area → +1 */}
+                    <button
+                      type="button"
+                      onClick={() => setBoxItems((p) => p.map((x) => x.id === item.id ? { ...x, count: x.count + 1 } : x))}
+                      aria-label={`${item.name} hinzufügen`}
+                      className="flex flex-1 items-center gap-3 px-4 py-3 text-left active:opacity-70"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black text-cheapr-dark opacity-40">
+                        {item.count}×
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-black text-cheapr-dark">
+                          {item.name}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-xs font-black text-cheapr-dark opacity-60">
+                        {formatPrice(item.price * item.count)} €
+                      </span>
+                    </button>
+                    {/* Minus → decrement / remove at 0 */}
+                    <button
+                      type="button"
+                      onClick={() => setBoxItems((p) => {
+                        const updated = p.map((x) => x.id === item.id ? { ...x, count: x.count - 1 } : x)
+                        return updated.filter((x) => x.count > 0)
+                      })}
+                      aria-label={`${item.name} entfernen`}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mr-2 text-base font-black text-cheapr-dark opacity-30 transition-opacity hover:opacity-70 active:opacity-90"
+                    >
+                      −
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              {/* Dashboard */}
+              <div style={DARK_BOX} className="rounded-2xl px-4 py-4 space-y-2.5 mt-2">
+                <div className="flex justify-between text-sm font-bold opacity-50">
+                  <span>Warenwert</span>
+                  <span>{formatPrice(warenwert)} €</span>
+                </div>
+                <div className="flex justify-between text-sm font-bold text-orange-400">
+                  <span>Rabatt</span>
+                  <span>–{formatPrice(ersparnis)} €</span>
+                </div>
+                <div className="h-px" style={{ backgroundColor: 'rgba(245,162,0,0.2)' }} />
+                <div className="flex justify-between">
+                  <span className="text-base font-black">Verkaufspreis</span>
+                  <span className="text-base font-black">{formatPrice(verkaufspreis)} €</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </WizardShell>
+
+        {/* Underfill popup */}
+        {showUnderfillPopup && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5"
+            onClick={() => setShowUnderfillPopup(false)}
+          >
+            <div
+              style={{ backgroundColor: '#222222', color: '#F5A200' }}
+              className="w-full max-w-sm rounded-3xl p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-xl font-black leading-snug mb-1">Box zu leer ⚠️</p>
+              <p className="text-sm font-medium opacity-60 mb-1">
+                Der Verkaufspreis <strong className="opacity-100">{formatPrice(verkaufspreis)} €</strong> liegt unter dem Lefty-Festpreis von{' '}
+                <strong className="opacity-100">{festpreis} €</strong>.
+              </p>
+              <p className="text-[11px] font-medium opacity-40 mb-6">
+                Füge mehr Artikel hinzu oder wähle eine kleinere Box.
+              </p>
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => { setShowUnderfillPopup(false); setStep('add-item') }}
+                  className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={{ backgroundColor: '#F5A200', color: '#222222' }}
+                >
+                  + Weiteren Artikel hinzufügen
+                </button>
+                {prevBoxType && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAngebotType(prevBoxType)
+                      setShowUnderfillPopup(false)
+                    }}
+                    className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-80 active:scale-[0.98]"
+                    style={{ border: '2px solid rgba(245,162,0,0.4)' }}
+                  >
+                    Zu Lefty {prevBoxType} wechseln
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Overfill popup */}
+        {showOverfillPopup && nextBoxType && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-5"
+            onClick={() => setShowOverfillPopup(false)}
+          >
+            <div
+              style={{ backgroundColor: '#222222', color: '#F5A200' }}
+              className="w-full max-w-sm rounded-3xl p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-xl font-black leading-snug mb-1">Upgrade möglich 🚀</p>
+              <p className="text-sm font-medium opacity-60 mb-1">
+                Dein Warenwert reicht bereits für eine <strong className="opacity-100">Lefty {nextBoxType}</strong>.
+              </p>
+              <p className="text-[11px] font-medium opacity-40 mb-6">
+                Upgrade auf die größere Box – oder biete diese Box günstiger für Kunden an.
+              </p>
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAngebotType(nextBoxType)
+                    setShowOverfillPopup(false)
+                  }}
+                  className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={{ backgroundColor: '#F5A200', color: '#222222' }}
+                >
+                  Zu Lefty {nextBoxType} upgraden
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowOverfillPopup(false); setStep('time') }}
+                  className="flex w-full items-center justify-center rounded-2xl px-5 py-3.5 text-[15px] font-black transition-all hover:opacity-80 active:scale-[0.98]"
+                  style={{ border: '2px solid rgba(245,162,0,0.4)' }}
+                >
+                  Günstiger anbieten mit Lefty {angebotType}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ─── TIME ─────────────────────────────────────────────────
 
   return (
     <WizardShell
       {...betriebBadge}
-      stepCount={`${bCur} / ${BOX_TOTAL}`}
-      stepName="Anzahl"
-      currentStep={bCur}
-      totalSteps={BOX_TOTAL}
-      title="Wie viele Boxen?"
-      onBack={() => setBoxStep('time')}
-      onNext={handleBoxSubmit}
-      nextLabel={loadingLabel}
+      stepCount="3 / 3"
+      stepName="Abholzeit"
+      currentStep={3}
+      totalSteps={3}
+      title="Bis wann abholbar?"
+      onBack={() => setStep('overview')}
+      onNext={() => {
+        if (!abholzeit) { setError('Bitte eine Abholzeit angeben.'); return }
+        setError(null)
+        submitAngebot()
+      }}
+      nextLabel={loading ? 'Wird gesendet…' : 'Absenden'}
       nextDisabled={loading}
     >
       {errorBanner}
-      <StepperInteger value={portionen} onChange={setPortionen} min={1} />
+      <input
+        type="time"
+        value={abholzeit}
+        onChange={(e) => { setAbholzeit(e.target.value); setError(null) }}
+        style={DARK_BOX}
+        className={TIME_CLS}
+      />
     </WizardShell>
   )
 }
@@ -491,8 +507,8 @@ function PhotoPicker({ fotoPreview, onClick }: { fotoPreview: string | null; onC
         <img src={fotoPreview} alt="Vorschau" className="h-full max-h-60 w-full rounded-2xl object-cover" />
       ) : (
         <>
-          <span className="text-3xl opacity-50">+</span>
-          <span className="mt-2 text-xs font-semibold opacity-40">Tippe zum Hochladen</span>
+          <span className="text-3xl opacity-50">📷</span>
+          <span className="mt-2 text-xs font-semibold opacity-40">Tippe zum Fotografieren</span>
         </>
       )}
     </button>
