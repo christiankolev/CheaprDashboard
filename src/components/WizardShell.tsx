@@ -76,8 +76,8 @@ export default function WizardShell({
                 type="button"
                 onClick={onNext}
                 disabled={nextDisabled}
-                style={{ backgroundColor: '#222222', color: '#F5A200' }}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-25"
+                style={{ backgroundColor: '#F5A200', color: '#222222' }}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-cheapr-dark px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-25"
               >
                 {nextLabel}
                 {!nextDisabled && (
@@ -92,8 +92,8 @@ export default function WizardShell({
                   type="button"
                   onClick={onNext}
                   disabled={nextDisabled}
-                  style={{ backgroundColor: '#222222', color: '#F5A200' }}
-                  className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl transition-all hover:opacity-90 active:scale-[0.98] ${nextDisabled ? 'opacity-25' : ''}`}
+                  style={{ backgroundColor: '#F5A200', color: '#222222' }}
+                  className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.98] ${nextDisabled ? 'opacity-25' : ''}`}
                 >
                   <svg width="18" height="18" viewBox="0 0 14 14" fill="none">
                     <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />

@@ -92,43 +92,6 @@ function boxVp(items: BoxItem[]): number {
   return Math.round(boxTotalPrice(items) * 0.3 * 100) / 100
 }
 
-function mergeIntoOverflow(overflow: BoxItem[], unit: BoxItem): BoxItem[] {
-  const idx = overflow.findIndex(o => o.name === unit.name && o.price === unit.price)
-  if (idx >= 0) {
-    const next = [...overflow]
-    next[idx] = { ...next[idx], count: next[idx].count + unit.count }
-    return next
-  }
-  return [...overflow, unit]
-}
-
-function popOneUnit(items: BoxItem[]): { items: BoxItem[]; unit: BoxItem | null } {
-  if (items.length === 0) return { items: [], unit: null }
-  const next = items.map(i => ({ ...i }))
-  const lastIdx = next.length - 1
-  const last = next[lastIdx]
-  if (last.count > 1) {
-    next[lastIdx] = { ...last, count: last.count - 1 }
-    return { items: next, unit: { ...last, id: crypto.randomUUID(), count: 1 } }
-  }
-  const unit = next.pop()!
-  return { items: next, unit: { ...unit, id: crypto.randomUUID() } }
-}
-
-function splitItemsAtMaxVp(items: BoxItem[], maxVp: number): { kept: BoxItem[]; overflow: BoxItem[] } {
-  let kept = items.map(i => ({ ...i }))
-  let overflow: BoxItem[] = []
-
-  while (kept.length > 0 && boxVp(kept) > maxVp) {
-    const { items: nextKept, unit } = popOneUnit(kept)
-    kept = nextKept
-    if (!unit) break
-    overflow = mergeIntoOverflow(overflow, unit)
-  }
-
-  return { kept, overflow }
-}
-
 function autoDetectBoxType(verkaufspreis: number): AngebotType {
   if (verkaufspreis >= LEFTY_PRICES['L']) return 'L'
   if (verkaufspreis >= LEFTY_PRICES['M']) return 'M'
@@ -166,9 +129,12 @@ function buildTelegramCaption(
   ].join('\n')
 }
 
-const MAX_BOX_VP = LEFTY_PRICES['L']
-
 const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
+
+const CONTINUE_ARROW_BTN_CLS =
+  'flex aspect-square h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.97]'
+
+const CONTINUE_ARROW_BTN_STYLE = { backgroundColor: '#F5A200', color: '#222222' } as const
 
 const INPUT_CLS =
   'w-full rounded-2xl px-4 py-4 text-lg font-bold placeholder:font-medium placeholder:opacity-40 focus:outline-none'
@@ -219,21 +185,26 @@ function InsertIcon() {
 const ACTION_BTN_CLS =
   'flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-[11px] font-bold opacity-50 transition-all hover:opacity-80 active:scale-[0.98]'
 
+const ADD_ITEM_BTN_CLS =
+  'flex w-full items-center justify-center rounded-2xl py-3.5 transition-all hover:opacity-90 active:scale-[0.98]'
+
+const SHOW_LEFTY_NAV_TRIGGER = false
+const SHOW_NEW_BOX_BUTTON = false
+
 function LeftyEmptySummary({ onInsert }: { onInsert?: () => void }) {
+  if (!onInsert) return null
+
   return (
-    <div style={DARK_BOX} className="mt-1 space-y-2.5 rounded-2xl px-4 py-6">
-      <p className="text-center text-sm font-medium opacity-60">Noch keine Artikel</p>
-      {onInsert && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onInsert() }}
-          className={ACTION_BTN_CLS}
-          style={{ backgroundColor: 'rgba(245,162,0,0.15)' }}
-        >
-          <InsertIcon />
-          Lefty einfügen
-        </button>
-      )}
+    <div style={DARK_BOX} className="mt-1 rounded-2xl px-4 py-4">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onInsert() }}
+        className={ACTION_BTN_CLS}
+        style={{ backgroundColor: 'rgba(245,162,0,0.15)' }}
+      >
+        <InsertIcon />
+        Lefty einfügen
+      </button>
     </div>
   )
 }
@@ -749,9 +720,10 @@ function LeftyDropdownSection({
                 type="button"
                 onClick={onAdd}
                 aria-label="Artikel hinzufügen"
-                className="flex w-full items-center justify-center rounded-2xl bg-cheapr-dark/10 py-3.5 transition-all hover:bg-cheapr-dark/15 active:scale-[0.98]"
+                className={ADD_ITEM_BTN_CLS}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
               >
-                <span className="text-xl font-black text-cheapr-dark/50">+</span>
+                <span className="text-xl font-black">+</span>
               </button>
               <LeftyEmptySummary onInsert={onInsert} />
             </>
@@ -773,9 +745,11 @@ function LeftyDropdownSection({
               <button
                 type="button"
                 onClick={onAdd}
-                className="flex w-full items-center justify-center rounded-2xl bg-cheapr-dark/10 py-3.5 transition-all hover:bg-cheapr-dark/15 active:scale-[0.98]"
+                aria-label="Artikel hinzufügen"
+                className={ADD_ITEM_BTN_CLS}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
               >
-                <span className="text-xl font-black text-cheapr-dark/50">+</span>
+                <span className="text-xl font-black">+</span>
               </button>
               <LeftyPriceSummary
                 warenwert={warenwert}
@@ -929,25 +903,26 @@ function LeftyNav({ boxes, activeId, open, onToggle, onSwitchBox, onDeleteBox, o
         }
       `}</style>
 
-      {/* Floating button */}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-label="Box-Übersicht öffnen"
-        className="fixed top-[14px] right-5 z-40 flex items-center justify-center"
-      >
-        <div className="relative">
-          <img src={LeftyTueteSrc} alt="Lefty" className="h-[30px] w-auto" />
-          {pendingCount > 0 && (
-            <span
-              className="absolute -top-1.5 -right-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-0.5 text-[10px] font-black"
-              style={{ backgroundColor: '#222222', color: '#F5A200' }}
-            >
-              {pendingCount}
-            </span>
-          )}
-        </div>
-      </button>
+      {SHOW_LEFTY_NAV_TRIGGER && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label="Box-Übersicht öffnen"
+          className="fixed top-[14px] right-5 z-40 flex items-center justify-center"
+        >
+          <div className="relative">
+            <img src={LeftyTueteSrc} alt="Lefty" className="h-[30px] w-auto" />
+            {pendingCount > 0 && (
+              <span
+                className="absolute -top-1.5 -right-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-0.5 text-[10px] font-black"
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
+              >
+                {pendingCount}
+              </span>
+            )}
+          </div>
+        </button>
+      )}
 
       {/* Backdrop + panel */}
       {open && (
@@ -1132,12 +1107,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     }, 320)
   }
 
-  const openMovePicker = (boxId: string, itemId: string) => {
-    setMovePickerSource({ boxId, itemId })
-    setMovePickerMounted(true)
-    requestAnimationFrame(() => requestAnimationFrame(() => setMovePickerVisible(true)))
-  }
-
   const closeMovePicker = () => {
     setMovePickerVisible(false)
     setTimeout(() => {
@@ -1168,36 +1137,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     const sourceUpdates = applyBoxItems(newSourceItems)
 
     if (target === 'new') {
-      let targetItems = [unit]
-      if (boxVp(targetItems) > MAX_BOX_VP) {
-        const { kept, overflow } = splitItemsAtMaxVp(targetItems, MAX_BOX_VP)
-        targetItems = kept
-        if (overflow.length > 0) {
-          const overflowBox: BoxState = {
-            ...createEmptyBox(),
-            items: overflow,
-            angebotType: 'L',
-            step: 'overview',
-          }
-          setBoxes(prev => [
-            ...prev.map(b => b.id === sourceBoxId
-              ? { ...b, ...sourceUpdates, angebotType: sourceUpdates.angebotType ?? b.angebotType, error: null }
-              : b
-            ),
-            {
-              ...createEmptyBox(),
-              items: targetItems,
-              angebotType: autoDetectBoxType(boxVp(targetItems)),
-              step: 'overview',
-            },
-            overflowBox,
-          ])
-          setActiveId(overflowBox.id)
-          closeMovePicker()
-          return
-        }
-      }
-
+      const targetItems = [unit]
       const newBox: BoxState = {
         ...createEmptyBox(),
         items: targetItems,
@@ -1224,29 +1164,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     let targetItems = existing
       ? targetBox.items.map(i => i.id === existing.id ? { ...i, count: i.count + 1 } : i)
       : [...targetBox.items, unit]
-
-    if (boxVp(targetItems) > MAX_BOX_VP) {
-      const { kept, overflow } = splitItemsAtMaxVp(targetItems, MAX_BOX_VP)
-      const overflowBox: BoxState = {
-        ...createEmptyBox(),
-        items: overflow,
-        angebotType: 'L',
-        step: 'overview',
-      }
-      setBoxes(prev => prev.map(b => {
-        if (b.id === sourceBoxId) {
-          return { ...b, ...sourceUpdates, angebotType: sourceUpdates.angebotType ?? b.angebotType, error: null }
-        }
-        if (b.id === target) {
-          return { ...b, items: kept, angebotType: autoDetectBoxType(boxVp(kept)), error: null }
-        }
-        return b
-      }).concat(overflowBox))
-      setActiveId(overflowBox.id)
-      setExpandedBoxIds(prev => new Set(prev).add(target).add(overflowBox.id))
-      closeMovePicker()
-      return
-    }
 
     setBoxes(prev => prev.map(b => {
       if (b.id === sourceBoxId) {
@@ -1441,6 +1358,19 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     })
   }
 
+  const incrementBoxItem = (boxId: string, itemId: string) => {
+    const box = boxes.find(b => b.id === boxId)
+    if (!box) return
+    const newItems = box.items.map(i =>
+      i.id === itemId ? { ...i, count: i.count + 1 } : i
+    )
+    updateBox(boxId, {
+      items: newItems,
+      angebotType: autoDetectBoxType(boxVp(newItems)),
+      error: null,
+    })
+  }
+
   const deleteBoxItem = (boxId: string, itemId: string) => {
     const box = boxes.find(b => b.id === boxId)
     if (!box) return
@@ -1470,44 +1400,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
       ? box.items.map(i => i.id === editingItemId ? newItem : i)
       : [...box.items, newItem]
     const candidateVp = boxVp(candidateItems)
-
-    if (candidateVp > MAX_BOX_VP) {
-      const { kept, overflow } = splitItemsAtMaxVp(candidateItems, MAX_BOX_VP)
-      if (overflow.length === 0) {
-        updateBox(activeId, { error: 'Artikel konnte nicht aufgeteilt werden.' })
-        return false
-      }
-
-      const overflowNames = overflow.map(i => i.name).join(', ')
-      const overflowBox: BoxState = {
-        ...createEmptyBox(),
-        items: overflow,
-        angebotType: 'L',
-        step: 'overview',
-      }
-
-      setBoxes(prev => [
-        ...prev.map(b => b.id === activeId
-          ? {
-              ...b,
-              items: kept,
-              angebotType: kept.length > 0 ? autoDetectBoxType(boxVp(kept)) : b.angebotType,
-              draftName: '',
-              draftPrice: '',
-              draftCount: 1,
-              error: kept.length > 0
-                ? `"${overflowNames}" wurde in eine Weite Lefty-Tüte verschoben (max. ${MAX_BOX_VP} €)`
-                : `"${overflowNames}" passt nur in eine Weite Lefty-Tüte (max. ${MAX_BOX_VP} €)`,
-              step: 'overview' as LeftyStep,
-            }
-          : b
-        ),
-        overflowBox,
-      ])
-      setActiveId(overflowBox.id)
-      setEditingItemId(null)
-      return true
-    }
 
     updateBox(activeId, {
       items: candidateItems,
@@ -1852,7 +1744,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                         if (item) openEditSheet(box.id, item)
                       }}
                       onDeleteItem={(itemId) => deleteBoxItem(box.id, itemId)}
-                      onItemTap={(itemId) => openMovePicker(box.id, itemId)}
+                      onItemTap={(itemId) => incrementBoxItem(box.id, itemId)}
                     />
                   </SwipeToDelete>
                 ))}
@@ -1861,29 +1753,31 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
             </div>
 
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-cheapr-dark/10 bg-[#F5A200] px-5 pb-5 pt-3">
-              <div className="mx-auto flex max-w-md items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={addNewBox}
-                  aria-label="Neue Box anlegen"
-                  className="relative flex aspect-square h-[72px] w-[72px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.97]"
-                  style={{ backgroundColor: '#F5A200' }}
-                >
-                  <img src={LeftyTueteSrc} alt="Lefty" className="h-7 w-auto" />
-                  <span className="px-0.5 text-center text-[8px] font-bold leading-tight text-cheapr-dark/70">
-                    Neue Lefty
-                  </span>
-                  <span
-                    className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full text-sm font-black leading-none"
-                    style={{ backgroundColor: '#222222', color: '#F5A200' }}
-                  >+</span>
-                </button>
+              <div className={`mx-auto flex max-w-md items-center gap-3 ${SHOW_NEW_BOX_BUTTON ? 'justify-between' : 'justify-end'}`}>
+                {SHOW_NEW_BOX_BUTTON && (
+                  <button
+                    type="button"
+                    onClick={addNewBox}
+                    aria-label="Neue Box anlegen"
+                    className="relative flex aspect-square h-[72px] w-[72px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.97]"
+                    style={{ backgroundColor: '#F5A200' }}
+                  >
+                    <img src={LeftyTueteSrc} alt="Lefty" className="h-7 w-auto" />
+                    <span className="px-0.5 text-center text-[8px] font-bold leading-tight text-cheapr-dark/70">
+                      Neue Lefty
+                    </span>
+                    <span
+                      className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full text-sm font-black leading-none"
+                      style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                    >+</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => updateBox(activeId, { step: 'time' })}
                   disabled={active.items.length === 0}
-                  style={{ backgroundColor: '#222222', color: '#F5A200' }}
-                  className={`flex aspect-square h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl transition-all hover:opacity-90 active:scale-[0.97] ${active.items.length === 0 ? 'opacity-25' : ''}`}
+                  style={CONTINUE_ARROW_BTN_STYLE}
+                  className={`${CONTINUE_ARROW_BTN_CLS} ${active.items.length === 0 ? 'opacity-25' : ''}`}
                 >
                   <svg width="22" height="22" viewBox="0 0 14 14" fill="none">
                     <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1989,32 +1883,32 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
           onNext={() => updateBox(activeId, { step: 'time' })}
           showNext={false}
           extraAction={
-            <div className="flex items-center justify-between gap-3">
-              {/* Neue Box — gleiche Quadrat-Größe wie Fortfahren */}
-              <button
-                type="button"
-                onClick={addNewBox}
-                aria-label="Neue Box anlegen"
-                className="relative flex aspect-square h-[72px] w-[72px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.97]"
-                style={{ backgroundColor: '#F5A200' }}
-              >
-                <img src={LeftyTueteSrc} alt="Lefty" className="h-7 w-auto" />
-                <span className="text-[8px] font-bold leading-tight text-cheapr-dark/70 text-center px-0.5">
-                  Weiteres Lefty
-                </span>
-                <span
-                  className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full text-sm font-black leading-none"
-                  style={{ backgroundColor: '#222222', color: '#F5A200' }}
-                >+</span>
-              </button>
+            <div className={`flex items-center gap-3 ${SHOW_NEW_BOX_BUTTON ? 'justify-between' : 'justify-end'}`}>
+              {SHOW_NEW_BOX_BUTTON && (
+                <button
+                  type="button"
+                  onClick={addNewBox}
+                  aria-label="Neue Box anlegen"
+                  className="relative flex aspect-square h-[72px] w-[72px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl border-2 border-cheapr-dark transition-all hover:opacity-90 active:scale-[0.97]"
+                  style={{ backgroundColor: '#F5A200' }}
+                >
+                  <img src={LeftyTueteSrc} alt="Lefty" className="h-7 w-auto" />
+                  <span className="text-[8px] font-bold leading-tight text-cheapr-dark/70 text-center px-0.5">
+                    Weiteres Lefty
+                  </span>
+                  <span
+                    className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full text-sm font-black leading-none"
+                    style={{ backgroundColor: '#222222', color: '#F5A200' }}
+                  >+</span>
+                </button>
+              )}
 
-              {/* Fortfahren — gleiche Quadrat-Größe */}
               <button
                 type="button"
                 onClick={() => updateBox(activeId, { step: 'time' })}
                 disabled={active.items.length === 0}
-                style={{ backgroundColor: '#222222', color: '#F5A200' }}
-                className={`flex aspect-square h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl transition-all hover:opacity-90 active:scale-[0.97] ${active.items.length === 0 ? 'opacity-25' : ''}`}
+                style={CONTINUE_ARROW_BTN_STYLE}
+                className={`${CONTINUE_ARROW_BTN_CLS} ${active.items.length === 0 ? 'opacity-25' : ''}`}
               >
                 <svg width="22" height="22" viewBox="0 0 14 14" fill="none">
                   <path d="M5 2.5L9.5 7L5 11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
@@ -2032,9 +1926,10 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                 type="button"
                 onClick={() => openAddSheet()}
                 aria-label="Artikel hinzufügen"
-                className="flex w-full items-center justify-center rounded-2xl bg-cheapr-dark/10 py-3.5 transition-all hover:bg-cheapr-dark/15 active:scale-[0.98]"
+                className={ADD_ITEM_BTN_CLS}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
               >
-                <span className="text-xl font-black text-cheapr-dark/50">+</span>
+                <span className="text-xl font-black">+</span>
               </button>
               <LeftyEmptySummary onInsert={hasInsertSources(activeId) ? () => openInsertPicker(activeId) : undefined} />
             </div>
@@ -2046,7 +1941,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                     <SwipeableItem
                       onEdit={() => openEditSheet(activeId, item)}
                       onDelete={() => deleteBoxItem(activeId, item.id)}
-                      onTap={() => openMovePicker(activeId, item.id)}
+                      onTap={() => incrementBoxItem(activeId, item.id)}
                     >
                       <ItemRow item={item} />
                     </SwipeableItem>
@@ -2059,9 +1954,10 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                 type="button"
                 onClick={() => openAddSheet()}
                 aria-label="Artikel hinzufügen"
-                className="flex w-full items-center justify-center rounded-2xl bg-cheapr-dark/10 py-3.5 transition-all hover:bg-cheapr-dark/15 active:scale-[0.98]"
+                className={ADD_ITEM_BTN_CLS}
+                style={{ backgroundColor: '#222222', color: '#F5A200' }}
               >
-                <span className="text-xl font-black text-cheapr-dark/50">+</span>
+                <span className="text-xl font-black">+</span>
               </button>
 
               <LeftyPriceSummary
