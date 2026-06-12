@@ -140,7 +140,7 @@ const INPUT_CLS =
   'w-full rounded-2xl px-4 py-4 text-lg font-bold placeholder:font-medium placeholder:opacity-40 focus:outline-none'
 
 const TIME_CLS =
-  'w-full rounded-2xl px-4 py-4 text-center text-2xl font-black focus:outline-none [color-scheme:dark]'
+  'block w-full min-w-0 max-w-full box-border rounded-2xl px-4 py-4 text-center text-2xl font-black focus:outline-none [color-scheme:dark] [appearance:none] [-webkit-appearance:none] [&::-webkit-date-and-time-value]:w-full [&::-webkit-date-and-time-value]:text-center'
 
 const EDIT_ACTION_BG = '#C48A00'
 
@@ -2138,13 +2138,15 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         nextLabel="Weiter"
       >
         {errorBanner}
-        <input
-          type="time"
-          value={active.abholzeit}
-          onChange={(e) => updateBox(activeId, { abholzeit: e.target.value, error: null })}
-          style={DARK_BOX}
-          className={TIME_CLS}
-        />
+        <div className="w-full min-w-0">
+          <input
+            type="time"
+            value={active.abholzeit}
+            onChange={(e) => updateBox(activeId, { abholzeit: e.target.value, error: null })}
+            style={{ ...DARK_BOX, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}
+            className={TIME_CLS}
+          />
+        </div>
       </WizardShell>
 
       <LeftyNav
