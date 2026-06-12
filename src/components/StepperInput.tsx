@@ -115,22 +115,33 @@ interface QuantityPickerProps {
   label?: string
 }
 
+const QTY_BTN_CLS =
+  'flex h-8 w-8 items-center justify-center rounded-lg text-base font-black transition-all hover:opacity-80 active:scale-95'
+
 export function QuantityPicker({ value, onChange, label = 'Wie viele davon?' }: QuantityPickerProps) {
   return (
-    <div>
-      <p className="mb-2 text-sm font-bold text-cheapr-dark">{label}</p>
-      <div className="grid grid-cols-5 gap-2">
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            type="button"
-            onClick={() => onChange(n)}
-            style={value === n ? DARK_BOX : OUTLINE_DARK}
-            className="rounded-xl py-3 text-lg font-black transition-all hover:opacity-90 active:scale-95"
-          >
-            {n}
-          </button>
-        ))}
+    <div className="flex items-center justify-between rounded-2xl bg-cheapr-dark/5 px-4 py-3">
+      <p className="text-xs font-medium text-cheapr-dark/45">{label}</p>
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(1, value - 1))}
+          aria-label="Weniger"
+          className={QTY_BTN_CLS}
+          style={{ ...OUTLINE_DARK, borderWidth: '1.5px' }}
+        >
+          −
+        </button>
+        <span className="min-w-[1.25rem] text-center text-sm font-black text-cheapr-dark">{value}</span>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(99, value + 1))}
+          aria-label="Mehr"
+          className={QTY_BTN_CLS}
+          style={{ ...OUTLINE_DARK, borderWidth: '1.5px' }}
+        >
+          +
+        </button>
       </div>
     </div>
   )

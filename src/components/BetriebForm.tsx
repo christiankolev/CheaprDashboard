@@ -3,10 +3,10 @@ import LeftyTueteSrc from '../../leftytüte.svg'
 import type { Betrieb } from '../config/betriebe'
 import { sendAngebotToTelegram, sendTextToTelegram } from '../lib/telegram'
 import AngebotTypeSelector, { LEFTY_PRICES, type AngebotType } from './AngebotTypeSelector'
-import BetriebBadge from './BetriebBadge'
 import StepperInput, { QuantityPicker } from './StepperInput'
 import Success, { type SubmittedLefty } from './Success'
 import WizardShell from './WizardShell'
+import WizardHeader from './WizardHeader'
 
 interface BetriebFormProps {
   betrieb: Betrieb
@@ -64,6 +64,11 @@ function formatPrice(num: number): string {
   return `${numStr} €`
 }
 
+function formatDecimalPrice(num: number): string {
+  if (Number.isInteger(num)) return String(num)
+  return num.toFixed(2).replace(/\.?0+$/, '').replace('.', ',')
+}
+
 function getSessionBoxes(boxes: BoxState[]): BoxState[] {
   return boxes.filter(b => b.angebotType && !b.submitted)
 }
@@ -81,6 +86,47 @@ function AnimatedCollapse({ open, children }: { open: boolean; children: ReactNo
 
 function boxTotalPrice(items: BoxItem[]): number {
   return items.reduce((sum, i) => sum + i.price * i.count, 0)
+}
+
+function boxVp(items: BoxItem[]): number {
+  return Math.round(boxTotalPrice(items) * 0.3 * 100) / 100
+}
+
+function mergeIntoOverflow(overflow: BoxItem[], unit: BoxItem): BoxItem[] {
+  const idx = overflow.findIndex(o => o.name === unit.name && o.price === unit.price)
+  if (idx >= 0) {
+    const next = [...overflow]
+    next[idx] = { ...next[idx], count: next[idx].count + unit.count }
+    return next
+  }
+  return [...overflow, unit]
+}
+
+function popOneUnit(items: BoxItem[]): { items: BoxItem[]; unit: BoxItem | null } {
+  if (items.length === 0) return { items: [], unit: null }
+  const next = items.map(i => ({ ...i }))
+  const lastIdx = next.length - 1
+  const last = next[lastIdx]
+  if (last.count > 1) {
+    next[lastIdx] = { ...last, count: last.count - 1 }
+    return { items: next, unit: { ...last, id: crypto.randomUUID(), count: 1 } }
+  }
+  const unit = next.pop()!
+  return { items: next, unit: { ...unit, id: crypto.randomUUID() } }
+}
+
+function splitItemsAtMaxVp(items: BoxItem[], maxVp: number): { kept: BoxItem[]; overflow: BoxItem[] } {
+  let kept = items.map(i => ({ ...i }))
+  let overflow: BoxItem[] = []
+
+  while (kept.length > 0 && boxVp(kept) > maxVp) {
+    const { items: nextKept, unit } = popOneUnit(kept)
+    kept = nextKept
+    if (!unit) break
+    overflow = mergeIntoOverflow(overflow, unit)
+  }
+
+  return { kept, overflow }
 }
 
 function autoDetectBoxType(verkaufspreis: number): AngebotType {
@@ -120,7 +166,7 @@ function buildTelegramCaption(
   ].join('\n')
 }
 
-const MAX_VERKAUFSPREIS = 10
+const MAX_BOX_VP = LEFTY_PRICES['L']
 
 const DARK_BOX = { backgroundColor: '#222222', color: '#F5A200' } as const
 
@@ -130,13 +176,24 @@ const INPUT_CLS =
 const TIME_CLS =
   'w-full rounded-2xl px-4 py-4 text-center text-2xl font-black focus:outline-none [color-scheme:dark]'
 
-const SWIPE_DELETE_THRESHOLD = 100
-const SWIPE_MAX = 120
+const EDIT_ACTION_BG = '#C48A00'
 
-function TrashIcon({ className = '' }: { className?: string }) {
+const SWIPE_SNAP_THRESHOLD = 48
+const SWIPE_ACTION_WIDTH = 96
+const SWIPE_MAX = SWIPE_ACTION_WIDTH
+
+function TrashIcon({ className = '', size = 24 }: { className?: string; size?: number }) {
   return (
-    <svg width="24" height="24" viewBox="0 0 14 14" fill="none" className={className}>
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" className={className}>
       <path d="M2 3.5h10M5.5 3.5V2.5h3v1M6 6v4.5M8 6v4.5M3 3.5l.7 8h6.6l.7-8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function EditIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 14 14" fill="none" className={className}>
+      <path d="M9.5 2.5l2 2L5 11H3v-2L9.5 2.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   )
 }
@@ -305,6 +362,243 @@ function LeftyPriceSummary({
   )
 }
 
+function SwipeableItem({
+  onEdit,
+  onDelete,
+  onTap,
+  children,
+}: {
+  onEdit: () => void
+  onDelete: () => void
+  onTap?: () => void
+  children: ReactNode
+}) {
+  const [offset, setOffset] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const startX = useRef(0)
+  const startY = useRef(0)
+  const startOffset = useRef(0)
+  const isHorizontal = useRef(false)
+
+  const reset = () => setOffset(0)
+  const snapOpen = () => setOffset(SWIPE_ACTION_WIDTH)
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    setIsDragging(true)
+    isHorizontal.current = false
+    startX.current = e.clientX
+    startY.current = e.clientY
+    startOffset.current = offset
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDragging) return
+    const dx = startX.current - e.clientX
+    const dy = Math.abs(startY.current - e.clientY)
+
+    if (!isHorizontal.current && (Math.abs(dx) > 8 || dy > 8)) {
+      isHorizontal.current = Math.abs(dx) > dy
+    }
+    if (!isHorizontal.current) return
+
+    e.preventDefault()
+    const next = Math.max(0, Math.min(SWIPE_MAX, startOffset.current + dx))
+    setOffset(next)
+  }
+
+  const finishDrag = (e: React.PointerEvent) => {
+    if (!isDragging) return
+    setIsDragging(false)
+    e.currentTarget.releasePointerCapture(e.pointerId)
+
+    if (isHorizontal.current) {
+      if (offset >= SWIPE_SNAP_THRESHOLD) snapOpen()
+      else reset()
+    } else if (startOffset.current === 0 && offset === 0) {
+      onTap?.()
+    } else {
+      reset()
+    }
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl">
+      <div
+        className="absolute inset-y-0 right-0 flex items-stretch"
+        style={{
+          width: SWIPE_ACTION_WIDTH,
+          transform: `translateX(${SWIPE_ACTION_WIDTH - offset}px)`,
+          transition: isDragging ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => { reset(); onEdit() }}
+          aria-label="Bearbeiten"
+          className="flex w-12 items-center justify-center text-cheapr-dark transition-opacity hover:opacity-80 active:opacity-60"
+          style={{ backgroundColor: EDIT_ACTION_BG }}
+        >
+          <EditIcon />
+        </button>
+        <button
+          type="button"
+          onClick={() => { reset(); onDelete() }}
+          aria-label="Löschen"
+          className="flex w-12 items-center justify-center bg-red-500 text-white transition-opacity hover:opacity-80 active:opacity-60"
+        >
+          <TrashIcon size={18} />
+        </button>
+      </div>
+      <div
+        className="relative"
+        style={{
+          transform: `translateX(-${offset}px)`,
+          touchAction: 'pan-y',
+          transition: isDragging ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={() => { setIsDragging(false); reset() }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function ItemRow({ item, onClick }: { item: BoxItem; onClick?: () => void }) {
+  const inner = (
+    <>
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black text-cheapr-dark opacity-40">
+        {item.count}×
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-black text-cheapr-dark">{item.name}</p>
+      </div>
+      <span className="shrink-0 text-xs font-black text-cheapr-dark opacity-60">
+        {formatPrice(item.price * item.count)}
+      </span>
+    </>
+  )
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full items-center gap-3 bg-cheapr-dark/10 px-4 py-3 text-left transition-opacity active:opacity-70"
+      >
+        {inner}
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-3 bg-cheapr-dark/10 px-4 py-3">
+      {inner}
+    </div>
+  )
+}
+
+function ItemMovePicker({
+  sourceBoxId,
+  item,
+  sessionBoxes,
+  visible,
+  onSelectBox,
+  onSelectNew,
+  onClose,
+}: {
+  sourceBoxId: string
+  item: BoxItem
+  sessionBoxes: BoxState[]
+  visible: boolean
+  onSelectBox: (targetId: string) => void
+  onSelectNew: () => void
+  onClose: () => void
+}) {
+  const targets = sessionBoxes.filter(b => b.id !== sourceBoxId)
+  const isSingleLefty = sessionBoxes.length === 1
+
+  return (
+    <>
+      <div
+        className={`fixed inset-0 z-[60] backdrop-blur-sm transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+        onClick={onClose}
+      />
+      <div className="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center p-5">
+        <div
+          className={`pointer-events-auto w-full max-w-[280px] rounded-2xl px-4 py-4 transition-all duration-300 ease-out ${visible ? 'scale-100 opacity-100' : 'scale-95 opacity-0'}`}
+          style={{ backgroundColor: '#F5A200', boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}
+        >
+          <h3 className="text-base font-black text-cheapr-dark">Wohin packen?</h3>
+          <p className="mt-0.5 text-[11px] font-medium text-cheapr-dark/45">
+            {item.count > 1 ? `${item.count}× ` : ''}{item.name}
+          </p>
+
+          <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
+            {isSingleLefty ? (
+              <button
+                type="button"
+                onClick={onSelectNew}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-all hover:opacity-90 active:scale-[0.98]"
+                style={DARK_BOX}
+              >
+                <img src={LeftyTueteSrc} alt="Lefty Tüte" className="h-10 w-auto shrink-0" />
+                <div>
+                  <p className="text-xs font-black">In neue Lefty packen</p>
+                  <p className="mt-0.5 text-[10px] font-medium opacity-50">Neue Tüte anlegen</p>
+                </div>
+              </button>
+            ) : (
+              <>
+                {targets.map((box) => {
+                  const idx = sessionBoxes.findIndex(b => b.id === box.id) + 1
+                  const vp = boxVp(box.items)
+                  return (
+                    <button
+                      key={box.id}
+                      type="button"
+                      onClick={() => onSelectBox(box.id)}
+                      className="w-full rounded-xl px-3 py-2.5 text-left transition-all hover:opacity-90 active:scale-[0.98]"
+                      style={DARK_BOX}
+                    >
+                      <p className="text-[9px] font-bold uppercase tracking-wider opacity-40">
+                        {idx}. Lefty
+                      </p>
+                      <p className="mt-0.5 text-xs font-black">
+                        Lefty {box.angebotType} · {box.items.length} Artikel
+                      </p>
+                      <p className="mt-0.5 text-[10px] font-medium opacity-50">
+                        {formatPrice(vp)}
+                      </p>
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={onSelectNew}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-all hover:opacity-90 active:scale-[0.98]"
+                  style={DARK_BOX}
+                >
+                  <img src={LeftyTueteSrc} alt="Lefty Tüte" className="h-8 w-auto shrink-0" />
+                  <div>
+                    <p className="text-xs font-black">In neue Lefty packen</p>
+                    <p className="mt-0.5 text-[10px] font-medium opacity-50">Neue Tüte anlegen</p>
+                  </div>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 function SwipeToDelete({
   onDelete,
   children,
@@ -355,7 +649,7 @@ function SwipeToDelete({
     setIsDragging(false)
     e.currentTarget.releasePointerCapture(e.pointerId)
 
-    if (isHorizontal.current && offset >= SWIPE_DELETE_THRESHOLD) {
+    if (isHorizontal.current && offset >= SWIPE_SNAP_THRESHOLD) {
       onDelete()
     }
     reset()
@@ -394,7 +688,9 @@ interface LeftyDropdownSectionProps {
   onAdd: () => void
   onCopy: () => void
   onInsert?: () => void
-  updateBox: (id: string, updates: Partial<BoxState>) => void
+  onEditItem: (itemId: string) => void
+  onDeleteItem: (itemId: string) => void
+  onItemTap: (itemId: string) => void
 }
 
 function LeftyDropdownSection({
@@ -406,7 +702,9 @@ function LeftyDropdownSection({
   onAdd,
   onCopy,
   onInsert,
-  updateBox,
+  onEditItem,
+  onDeleteItem,
+  onItemTap,
 }: LeftyDropdownSectionProps) {
   const warenwert = boxTotalPrice(box.items)
   const ersparnis = Math.round(warenwert * 0.7 * 100) / 100
@@ -461,44 +759,14 @@ function LeftyDropdownSection({
             <>
               <ul className="space-y-1.5">
                 {box.items.map((item) => (
-                  <li key={item.id} className="flex items-center gap-2 rounded-2xl bg-cheapr-dark/10">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newItems = box.items.map(x =>
-                          x.id === item.id ? { ...x, count: x.count + 1 } : x
-                        )
-                        const vp2 = Math.round(boxTotalPrice(newItems) * 0.3 * 100) / 100
-                        updateBox(box.id, { items: newItems, angebotType: autoDetectBoxType(vp2) })
-                      }}
-                      className="flex flex-1 items-center gap-3 px-4 py-3 text-left active:opacity-70"
+                  <li key={item.id}>
+                    <SwipeableItem
+                      onEdit={() => onEditItem(item.id)}
+                      onDelete={() => onDeleteItem(item.id)}
+                      onTap={() => onItemTap(item.id)}
                     >
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black text-cheapr-dark opacity-40">
-                        {item.count}×
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-black text-cheapr-dark">{item.name}</p>
-                      </div>
-                      <span className="shrink-0 text-xs font-black text-cheapr-dark opacity-60">
-                        {formatPrice(item.price * item.count)}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newItems = box.items
-                          .map(x => x.id === item.id ? { ...x, count: x.count - 1 } : x)
-                          .filter(x => x.count > 0)
-                        const vp2 = Math.round(boxTotalPrice(newItems) * 0.3 * 100) / 100
-                        updateBox(box.id, {
-                          items: newItems,
-                          angebotType: newItems.length > 0 ? autoDetectBoxType(vp2) : box.angebotType,
-                        })
-                      }}
-                      className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base font-black text-cheapr-dark opacity-30 hover:opacity-70"
-                    >
-                      −
-                    </button>
+                      <ItemRow item={item} />
+                    </SwipeableItem>
                   </li>
                 ))}
               </ul>
@@ -519,6 +787,117 @@ function LeftyDropdownSection({
           )}
         </div>
       </AnimatedCollapse>
+    </div>
+  )
+}
+
+function LeftyConfirmCard({
+  box,
+  index,
+  selected,
+  selectable,
+  onToggle,
+  onEdit,
+}: {
+  box: BoxState
+  index: number
+  selected: boolean
+  selectable: boolean
+  onToggle?: () => void
+  onEdit?: () => void
+}) {
+  const warenwert = boxTotalPrice(box.items)
+  const ersparnis = Math.round(warenwert * 0.7 * 100) / 100
+  const vp = Math.round(warenwert * 0.3 * 100) / 100
+
+  const content = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <p className={`text-[10px] font-bold uppercase tracking-wider ${selected ? 'opacity-40' : 'opacity-30'}`}>
+            {index}. Lefty
+          </p>
+          <p className="mt-0.5 text-lg font-black">
+            {box.items.length === 0 ? 'Lefty' : `Lefty ${box.angebotType}`}
+          </p>
+          <p className={`mt-1 text-xs font-medium ${selected ? 'opacity-45' : 'opacity-35'}`}>
+            {box.items.length} Artikel · Abholung bis {box.abholzeit} Uhr
+          </p>
+        </div>
+        {onEdit ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onEdit() }}
+            aria-label="Lefty bearbeiten"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity hover:opacity-80 active:opacity-60"
+            style={{ backgroundColor: 'rgba(245,162,0,0.25)', color: '#F5A200' }}
+          >
+            <EditIcon />
+          </button>
+        ) : selectable ? (
+          <div
+            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
+              selected ? 'border-[#F5A200] bg-[#F5A200]' : 'border-cheapr-dark/25 bg-transparent'
+            }`}
+          >
+            {selected && (
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2 6.5L4.5 9L10 3" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </div>
+        ) : null}
+      </div>
+
+      <ul className="mt-4 space-y-1.5">
+        {box.items.map(item => (
+          <li
+            key={item.id}
+            className={`flex items-center justify-between gap-2 text-sm font-medium ${selected ? 'opacity-60' : 'opacity-50'}`}
+          >
+            <span className="min-w-0 truncate">
+              {item.count > 1 ? `${item.count}× ` : ''}{item.name}
+            </span>
+            <span className="shrink-0 font-black">{formatPrice(item.price * item.count)}</span>
+          </li>
+        ))}
+      </ul>
+
+      <div className={`mt-4 space-y-1.5 border-t pt-3 ${selected ? 'border-[#F5A200]/20' : 'border-cheapr-dark/10'}`}>
+        <div className={`flex justify-between text-xs font-bold ${selected ? 'opacity-45' : 'opacity-35'}`}>
+          <span>Warenwert</span>
+          <span>{formatPrice(warenwert)}</span>
+        </div>
+        <div className={`flex justify-between text-xs font-bold text-orange-400 ${selected ? 'opacity-90' : 'opacity-75'}`}>
+          <span>Ersparnis</span>
+          <span>–{formatPrice(ersparnis)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-sm font-black">Verkaufspreis</span>
+          <span className="text-lg font-black">{formatPrice(vp)}</span>
+        </div>
+      </div>
+    </>
+  )
+
+  if (selectable && onToggle) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`w-full rounded-2xl p-4 text-left transition-all active:scale-[0.98] ${
+          selected ? 'ring-2 ring-cheapr-dark shadow-md' : 'ring-1 ring-cheapr-dark/15 opacity-80 hover:opacity-95'
+        }`}
+        style={selected ? DARK_BOX : { backgroundColor: 'rgba(34,34,34,0.08)', color: '#222222' }}
+      >
+        {content}
+      </button>
+    )
+  }
+
+  return (
+    <div className="w-full rounded-2xl p-4 ring-2 ring-cheapr-dark shadow-md" style={DARK_BOX}>
+      {content}
     </div>
   )
 }
@@ -700,23 +1079,42 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
   const [insertPickerTargetId, setInsertPickerTargetId] = useState<string | null>(null)
   const [insertPickerMounted, setInsertPickerMounted] = useState(false)
   const [insertPickerVisible, setInsertPickerVisible] = useState(false)
+  const [movePickerSource, setMovePickerSource] = useState<{ boxId: string; itemId: string } | null>(null)
+  const [movePickerMounted, setMovePickerMounted] = useState(false)
+  const [movePickerVisible, setMovePickerVisible] = useState(false)
   const [expandedBoxIds, setExpandedBoxIds] = useState<Set<string>>(new Set())
   const [selectedSubmitIds, setSelectedSubmitIds] = useState<Set<string>>(new Set())
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const boxSectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const openAddSheet = (boxId?: string) => {
     const id = boxId ?? activeId
     setActiveId(id)
-    updateBox(id, { error: null })
+    setEditingItemId(null)
+    updateBox(id, { draftName: '', draftPrice: '', draftCount: 1, error: null })
+    setSheetMounted(true)
+    requestAnimationFrame(() => requestAnimationFrame(() => setSheetVisible(true)))
+  }
+
+  const openEditSheet = (boxId: string, item: BoxItem) => {
+    setActiveId(boxId)
+    setEditingItemId(item.id)
+    updateBox(boxId, {
+      draftName: item.name,
+      draftPrice: formatDecimalPrice(item.price),
+      draftCount: item.count,
+      error: null,
+    })
     setSheetMounted(true)
     requestAnimationFrame(() => requestAnimationFrame(() => setSheetVisible(true)))
   }
 
   const closeAddSheet = () => {
     setSheetVisible(false)
+    setEditingItemId(null)
     setTimeout(() => setSheetMounted(false), 320)
   }
 
@@ -732,6 +1130,155 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
       setInsertPickerMounted(false)
       setInsertPickerTargetId(null)
     }, 320)
+  }
+
+  const openMovePicker = (boxId: string, itemId: string) => {
+    setMovePickerSource({ boxId, itemId })
+    setMovePickerMounted(true)
+    requestAnimationFrame(() => requestAnimationFrame(() => setMovePickerVisible(true)))
+  }
+
+  const closeMovePicker = () => {
+    setMovePickerVisible(false)
+    setTimeout(() => {
+      setMovePickerMounted(false)
+      setMovePickerSource(null)
+    }, 320)
+  }
+
+  const applyBoxItems = (items: BoxItem[]) => {
+    const vp = boxVp(items)
+    return {
+      items,
+      angebotType: items.length > 0 ? autoDetectBoxType(vp) : undefined,
+    }
+  }
+
+  const moveItemToTarget = (sourceBoxId: string, itemId: string, target: string | 'new') => {
+    const source = boxes.find(b => b.id === sourceBoxId)
+    if (!source) return
+    const item = source.items.find(i => i.id === itemId)
+    if (!item) return
+
+    const unit: BoxItem = { ...item, id: crypto.randomUUID(), count: 1 }
+    const newSourceItems = item.count > 1
+      ? source.items.map(i => i.id === itemId ? { ...i, count: i.count - 1 } : i)
+      : source.items.filter(i => i.id !== itemId)
+
+    const sourceUpdates = applyBoxItems(newSourceItems)
+
+    if (target === 'new') {
+      let targetItems = [unit]
+      if (boxVp(targetItems) > MAX_BOX_VP) {
+        const { kept, overflow } = splitItemsAtMaxVp(targetItems, MAX_BOX_VP)
+        targetItems = kept
+        if (overflow.length > 0) {
+          const overflowBox: BoxState = {
+            ...createEmptyBox(),
+            items: overflow,
+            angebotType: 'L',
+            step: 'overview',
+          }
+          setBoxes(prev => [
+            ...prev.map(b => b.id === sourceBoxId
+              ? { ...b, ...sourceUpdates, angebotType: sourceUpdates.angebotType ?? b.angebotType, error: null }
+              : b
+            ),
+            {
+              ...createEmptyBox(),
+              items: targetItems,
+              angebotType: autoDetectBoxType(boxVp(targetItems)),
+              step: 'overview',
+            },
+            overflowBox,
+          ])
+          setActiveId(overflowBox.id)
+          closeMovePicker()
+          return
+        }
+      }
+
+      const newBox: BoxState = {
+        ...createEmptyBox(),
+        items: targetItems,
+        angebotType: autoDetectBoxType(boxVp(targetItems)),
+        step: 'overview',
+      }
+      setBoxes(prev => [
+        ...prev.map(b => b.id === sourceBoxId
+          ? { ...b, ...sourceUpdates, angebotType: sourceUpdates.angebotType ?? b.angebotType, error: null }
+          : b
+        ),
+        newBox,
+      ])
+      setActiveId(newBox.id)
+      setExpandedBoxIds(prev => new Set(prev).add(newBox.id))
+      closeMovePicker()
+      return
+    }
+
+    const targetBox = boxes.find(b => b.id === target)
+    if (!targetBox || target === sourceBoxId) return
+
+    const existing = targetBox.items.find(i => i.name === unit.name && i.price === unit.price)
+    let targetItems = existing
+      ? targetBox.items.map(i => i.id === existing.id ? { ...i, count: i.count + 1 } : i)
+      : [...targetBox.items, unit]
+
+    if (boxVp(targetItems) > MAX_BOX_VP) {
+      const { kept, overflow } = splitItemsAtMaxVp(targetItems, MAX_BOX_VP)
+      const overflowBox: BoxState = {
+        ...createEmptyBox(),
+        items: overflow,
+        angebotType: 'L',
+        step: 'overview',
+      }
+      setBoxes(prev => prev.map(b => {
+        if (b.id === sourceBoxId) {
+          return { ...b, ...sourceUpdates, angebotType: sourceUpdates.angebotType ?? b.angebotType, error: null }
+        }
+        if (b.id === target) {
+          return { ...b, items: kept, angebotType: autoDetectBoxType(boxVp(kept)), error: null }
+        }
+        return b
+      }).concat(overflowBox))
+      setActiveId(overflowBox.id)
+      setExpandedBoxIds(prev => new Set(prev).add(target).add(overflowBox.id))
+      closeMovePicker()
+      return
+    }
+
+    setBoxes(prev => prev.map(b => {
+      if (b.id === sourceBoxId) {
+        return { ...b, ...sourceUpdates, angebotType: sourceUpdates.angebotType ?? b.angebotType, error: null }
+      }
+      if (b.id === target) {
+        return { ...b, items: targetItems, angebotType: autoDetectBoxType(boxVp(targetItems)), error: null }
+      }
+      return b
+    }))
+    setActiveId(target)
+    setExpandedBoxIds(prev => new Set(prev).add(target))
+    closeMovePicker()
+  }
+
+  const renderMovePicker = () => {
+    if (!movePickerMounted || !movePickerSource) return null
+    const sourceBox = boxes.find(b => b.id === movePickerSource.boxId)
+    const item = sourceBox?.items.find(i => i.id === movePickerSource.itemId)
+    if (!sourceBox || !item) return null
+
+    return (
+      <ItemMovePicker
+        sourceBoxId={movePickerSource.boxId}
+        item={item}
+        sessionBoxes={getSessionBoxes(boxes)}
+        visible={movePickerVisible}
+        onSelectBox={(targetId) => moveItemToTarget(movePickerSource.boxId, movePickerSource.itemId, targetId)}
+        onSelectNew={() => moveItemToTarget(movePickerSource.boxId, movePickerSource.itemId, 'new')}
+        onClose={closeMovePicker}
+      />
+    )
   }
 
   const importIntoBox = (targetId: string, sourceId: string) => {
@@ -894,6 +1441,18 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     })
   }
 
+  const deleteBoxItem = (boxId: string, itemId: string) => {
+    const box = boxes.find(b => b.id === boxId)
+    if (!box) return
+    const newItems = box.items.filter(i => i.id !== itemId)
+    const vp2 = Math.round(boxTotalPrice(newItems) * 0.3 * 100) / 100
+    updateBox(boxId, {
+      items: newItems,
+      angebotType: newItems.length > 0 ? autoDetectBoxType(vp2) : box.angebotType,
+      error: null,
+    })
+  }
+
   const addBoxItem = (): boolean => {
     const box = getActive()
     if (!box) return false
@@ -901,29 +1460,52 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     if (!box.draftName.trim()) { updateBox(activeId, { error: 'Bitte einen Namen eingeben.' }); return false }
     if (isNaN(price) || price <= 0) { updateBox(activeId, { error: 'Bitte einen gültigen Preis eingeben.' }); return false }
 
-    const newItem = { id: crypto.randomUUID(), name: box.draftName.trim(), price, count: box.draftCount }
-    const candidateItems = [...box.items, newItem]
-    const candidateWarenwert = boxTotalPrice(candidateItems)
-    const candidateVp = Math.round(candidateWarenwert * 0.3 * 100) / 100
+    const newItem = {
+      id: editingItemId ?? crypto.randomUUID(),
+      name: box.draftName.trim(),
+      price,
+      count: box.draftCount,
+    }
+    const candidateItems = editingItemId
+      ? box.items.map(i => i.id === editingItemId ? newItem : i)
+      : [...box.items, newItem]
+    const candidateVp = boxVp(candidateItems)
 
-    // Auto-split: wenn Verkaufspreis > Max → neues Item in neue Box packen
-    if (candidateVp > MAX_VERKAUFSPREIS && box.items.length > 0) {
-      const currentVp = Math.round(boxTotalPrice(box.items) * 0.3 * 100) / 100
-      const overflowVp = Math.round(newItem.price * newItem.count * 0.3 * 100) / 100
+    if (candidateVp > MAX_BOX_VP) {
+      const { kept, overflow } = splitItemsAtMaxVp(candidateItems, MAX_BOX_VP)
+      if (overflow.length === 0) {
+        updateBox(activeId, { error: 'Artikel konnte nicht aufgeteilt werden.' })
+        return false
+      }
+
+      const overflowNames = overflow.map(i => i.name).join(', ')
       const overflowBox: BoxState = {
         ...createEmptyBox(),
-        items: [newItem],
-        angebotType: autoDetectBoxType(overflowVp),
+        items: overflow,
+        angebotType: 'L',
         step: 'overview',
       }
+
       setBoxes(prev => [
         ...prev.map(b => b.id === activeId
-          ? { ...b, angebotType: autoDetectBoxType(currentVp), draftName: '', draftPrice: '', draftCount: 1, error: `"${newItem.name}" wurde in eine neue Box verschoben (max. ${MAX_VERKAUFSPREIS} €)`, step: 'overview' as LeftyStep }
+          ? {
+              ...b,
+              items: kept,
+              angebotType: kept.length > 0 ? autoDetectBoxType(boxVp(kept)) : b.angebotType,
+              draftName: '',
+              draftPrice: '',
+              draftCount: 1,
+              error: kept.length > 0
+                ? `"${overflowNames}" wurde in eine Weite Lefty-Tüte verschoben (max. ${MAX_BOX_VP} €)`
+                : `"${overflowNames}" passt nur in eine Weite Lefty-Tüte (max. ${MAX_BOX_VP} €)`,
+              step: 'overview' as LeftyStep,
+            }
           : b
         ),
         overflowBox,
       ])
       setActiveId(overflowBox.id)
+      setEditingItemId(null)
       return true
     }
 
@@ -936,6 +1518,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
       error: null,
       step: 'overview',
     })
+    setEditingItemId(null)
     return true
   }
 
@@ -954,9 +1537,44 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         ? { ...b, abholzeit: time, step: 'confirm' as LeftyStep, error: null }
         : b
     ))
-    setSelectedSubmitIds(new Set(eligibleIds))
+    setSelectedSubmitIds(eligibleIds.length === 1 ? new Set(eligibleIds) : new Set(eligibleIds))
     setSubmitError(null)
     if (eligibleIds.length > 0) setActiveId(eligibleIds[0])
+  }
+
+  const editFromConfirm = (boxId: string) => {
+    setActiveId(boxId)
+    setBoxes(prev => prev.map(b =>
+      b.id === boxId ? { ...b, step: 'overview' as LeftyStep, error: null } : b
+    ))
+    setSubmitError(null)
+  }
+
+  const getWizardStepNumber = (step: LeftyStep): number => {
+    if (step === 'time') return 2
+    if (step === 'confirm') return 3
+    return 1
+  }
+
+  const navigateToWizardStep = (targetStep: number) => {
+    const box = getActive()
+    if (!box) return
+    const current = getWizardStepNumber(box.step)
+    if (targetStep >= current) return
+
+    if (targetStep === 1) {
+      if (isMultiSession()) goToSessionOverview()
+      else updateBox(activeId, { step: 'overview', error: null })
+      return
+    }
+
+    if (targetStep === 2) {
+      setBoxes(prev => prev.map(b =>
+        b.angebotType && !b.submitted && b.items.length > 0
+          ? { ...b, step: 'time' as LeftyStep, error: null }
+          : b
+      ))
+    }
   }
 
   const toggleSubmitSelection = (id: string) => {
@@ -1089,6 +1707,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         title="Foto machen"
         hint="Knips ein Bild der übrigen Sachen"
         onBack={() => updateBox(activeId, { angebotType: null })}
+        onStepClick={navigateToWizardStep}
         onNext={() => {
           if (!active.foto) { updateBox(activeId, { error: 'Bitte ein Foto hochladen.' }); return }
           updateBox(activeId, { error: null, step: 'add-item' })
@@ -1137,6 +1756,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         totalSteps={2}
         title="Was ist drin?"
         onBack={() => updateBox(activeId, { error: null, draftName: '', draftPrice: '', draftCount: 1, step: 'overview' })}
+        onStepClick={navigateToWizardStep}
         onNext={addBoxItem}
         nextLabel="Hinzufügen"
       >
@@ -1144,7 +1764,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         <div className="space-y-5">
           <input
             type="text"
-            autoFocus
             value={active.draftName}
             onChange={(e) => updateBox(activeId, { draftName: e.target.value, error: null })}
             placeholder="Name (z.B. Croissant)"
@@ -1190,38 +1809,29 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
       return (
         <>
           <div className="flex min-h-dvh flex-col bg-[#F5A200]">
-            <div className="flex items-center justify-between px-5 pb-1 pt-4">
-              <button
-                type="button"
-                onClick={goToLeftySelector}
-                aria-label="Zurück"
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-cheapr-dark/10 text-cheapr-dark/50 transition-colors hover:bg-cheapr-dark/15"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M9 11.5L4.5 7L9 2.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-              <BetriebBadge
-                label={`${betrieb.code} · ${betrieb.name}`}
-                image={betrieb.bild}
-                imageAlt={betrieb.name}
-              />
-              <div className="h-9 w-9" />
-            </div>
+            <WizardHeader
+              betriebCode={betrieb.code}
+              betriebName={betrieb.name}
+              betriebBild={betrieb.bild}
+              onBack={goToLeftySelector}
+              currentStep={1}
+              onStepClick={navigateToWizardStep}
+            />
 
-            <div className="flex-1 overflow-y-auto px-5 py-4 pb-36">
-              <h2 className="text-[1.75rem] font-black leading-tight text-cheapr-dark">Deine Leftys</h2>
-              <p className="mt-1 text-sm font-medium text-cheapr-dark/50">
-                {sessionBoxes.length} Leftys · Tippe zum Aufklappen
-              </p>
+            <div className="flex-1 overflow-y-auto px-5 pb-36 pt-4">
+              <div className="mx-auto w-full max-w-md">
+                <h2 className="text-[1.75rem] font-black leading-tight text-cheapr-dark">Deine Leftys</h2>
+                <p className="mt-1 text-sm font-medium text-cheapr-dark/50">
+                  {sessionBoxes.length} Leftys · Tippe zum Aufklappen
+                </p>
 
-              {active.error && (
-                <div className="mb-4 mt-4 rounded-xl bg-red-500/20 px-4 py-2.5 text-center text-xs font-bold text-red-700">
-                  {active.error}
-                </div>
-              )}
+                {active.error && (
+                  <div className="mb-4 mt-4 rounded-xl bg-red-500/20 px-4 py-2.5 text-center text-xs font-bold text-red-700">
+                    {active.error}
+                  </div>
+                )}
 
-              <div className="mt-5 space-y-5">
+                <div className="mt-6 space-y-5">
                 {sessionBoxes.map((box, i) => (
                   <SwipeToDelete
                     key={box.id}
@@ -1237,10 +1847,16 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                       onAdd={() => openAddSheet(box.id)}
                       onCopy={() => copyBox(box.id)}
                       onInsert={hasInsertSources(box.id) ? () => openInsertPicker(box.id) : undefined}
-                      updateBox={updateBox}
+                      onEditItem={(itemId) => {
+                        const item = box.items.find(i => i.id === itemId)
+                        if (item) openEditSheet(box.id, item)
+                      }}
+                      onDeleteItem={(itemId) => deleteBoxItem(box.id, itemId)}
+                      onItemTap={(itemId) => openMovePicker(box.id, itemId)}
                     />
                   </SwipeToDelete>
                 ))}
+                </div>
               </div>
             </div>
 
@@ -1300,7 +1916,9 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                   style={{ backgroundColor: '#F5A200', boxShadow: '0 -8px 40px rgba(0,0,0,0.2)' }}
                 >
                   <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-cheapr-dark/20" />
-                  <h3 className="mb-4 text-xl font-black text-cheapr-dark">Was kommt rein?</h3>
+                  <h3 className="mb-4 text-xl font-black text-cheapr-dark">
+                    {editingItemId ? 'Artikel bearbeiten' : 'Was kommt rein?'}
+                  </h3>
                   {active.error && (
                     <div className="mb-3 rounded-xl bg-red-500/20 px-4 py-2.5 text-center text-xs font-bold text-red-700">
                       {active.error}
@@ -1309,7 +1927,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                   <div className="space-y-5">
                     <input
                       type="text"
-                      autoFocus
                       value={active.draftName}
                       onChange={(e) => updateBox(activeId, { draftName: e.target.value, error: null })}
                       placeholder="Name (z.B. Croissant)"
@@ -1334,7 +1951,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                     style={{ backgroundColor: '#222222', color: '#F5A200' }}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98]"
                   >
-                    Hinzufügen
+                    {editingItemId ? 'Speichern' : 'Hinzufügen'}
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                       <path d="M7 2.5V11.5M2.5 7H11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
                     </svg>
@@ -1344,6 +1961,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
             </>
           )}
           {renderInsertPicker()}
+          {renderMovePicker()}
         </>
       )
     }
@@ -1364,9 +1982,10 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
           hint={
             active.items.length > 0
               ? `${active.items.length} Artikel`
-              : 'Füge Artikel mit dem Button oben hinzu'
+              : 'In ein Lefty gehören mehrere Artikel :)'
           }
           onBack={goToLeftySelector}
+          onStepClick={navigateToWizardStep}
           onNext={() => updateBox(activeId, { step: 'time' })}
           showNext={false}
           extraAction={
@@ -1423,51 +2042,14 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
             <div className="space-y-1.5">
               <ul className="space-y-1.5">
                 {active.items.map((item) => (
-                  <li key={item.id} className="flex items-center gap-2 rounded-2xl bg-cheapr-dark/10">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newItems = active.items.map(x =>
-                          x.id === item.id ? { ...x, count: x.count + 1 } : x
-                        )
-                        const warenwert2 = boxTotalPrice(newItems)
-                        const vp2 = Math.round(warenwert2 * 0.3 * 100) / 100
-                        updateBox(activeId, {
-                          items: newItems,
-                          angebotType: autoDetectBoxType(vp2),
-                        })
-                      }}
-                      aria-label={`${item.name} hinzufügen`}
-                      className="flex flex-1 items-center gap-3 px-4 py-3 text-left active:opacity-70"
+                  <li key={item.id}>
+                    <SwipeableItem
+                      onEdit={() => openEditSheet(activeId, item)}
+                      onDelete={() => deleteBoxItem(activeId, item.id)}
+                      onTap={() => openMovePicker(activeId, item.id)}
                     >
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black text-cheapr-dark opacity-40">
-                        {item.count}×
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-black text-cheapr-dark">{item.name}</p>
-                      </div>
-                      <span className="shrink-0 text-xs font-black text-cheapr-dark opacity-60">
-                        {formatPrice(item.price * item.count)}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newItems = active.items
-                          .map(x => x.id === item.id ? { ...x, count: x.count - 1 } : x)
-                          .filter(x => x.count > 0)
-                        const warenwert2 = boxTotalPrice(newItems)
-                        const vp2 = Math.round(warenwert2 * 0.3 * 100) / 100
-                        updateBox(activeId, {
-                          items: newItems,
-                          angebotType: newItems.length > 0 ? autoDetectBoxType(vp2) : active.angebotType,
-                        })
-                      }}
-                      aria-label={`${item.name} entfernen`}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full mr-2 text-base font-black text-cheapr-dark opacity-30 transition-opacity hover:opacity-70 active:opacity-90"
-                    >
-                      −
-                    </button>
+                      <ItemRow item={item} />
+                    </SwipeableItem>
                   </li>
                 ))}
               </ul>
@@ -1521,7 +2103,9 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
               {/* drag handle */}
               <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-cheapr-dark/20" />
 
-              <h3 className="mb-4 text-xl font-black text-cheapr-dark">Was kommt rein?</h3>
+              <h3 className="mb-4 text-xl font-black text-cheapr-dark">
+                {editingItemId ? 'Artikel bearbeiten' : 'Was kommt rein?'}
+              </h3>
 
               {/* inline error */}
               {active.error && (
@@ -1533,7 +2117,6 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
               <div className="space-y-5">
                 <input
                   type="text"
-                  autoFocus
                   value={active.draftName}
                   onChange={(e) => updateBox(activeId, { draftName: e.target.value, error: null })}
                   placeholder="Name (z.B. Croissant)"
@@ -1559,7 +2142,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
                 style={{ backgroundColor: '#222222', color: '#F5A200' }}
                 className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-4 text-[15px] font-black tracking-wide transition-all hover:opacity-90 active:scale-[0.98]"
               >
-                Hinzufügen
+                {editingItemId ? 'Speichern' : 'Hinzufügen'}
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M7 2.5V11.5M2.5 7H11.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
                 </svg>
@@ -1569,6 +2152,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
           </>
         )}
         {renderInsertPicker()}
+        {renderMovePicker()}
       </>
     )
   }
@@ -1579,6 +2163,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
     const confirmBoxes = boxes.filter(
       b => b.step === 'confirm' && b.angebotType && !b.submitted && b.items.length > 0
     )
+    const isSingleConfirm = confirmBoxes.length === 1
 
     return (
       <>
@@ -1586,11 +2171,16 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
           {...betriebBadge}
           currentStep={3}
           totalSteps={3}
-          title="Welche willst du abschicken?"
-          hint="Einfach antippen zum Auswählen"
+          title={isSingleConfirm ? 'Alles bereit?' : 'Nochmal prüfen'}
+          hint={
+            isSingleConfirm
+              ? 'Prüfe dein Angebot bevor du abschickst'
+              : 'Wähle welche Leftys du abschicken möchtest'
+          }
           onBack={() => (isMultiSession() ? goToSessionOverview() : updateBox(activeId, { step: 'time' }))}
+          onStepClick={navigateToWizardStep}
           onNext={submitSelectedBoxes}
-          nextLabel={isSubmitting ? 'Wird gesendet…' : 'Absenden'}
+          nextLabel={isSubmitting ? 'Wird gesendet…' : 'Jetzt abschicken'}
           nextDisabled={isSubmitting || selectedSubmitIds.size === 0}
         >
           {submitError && (
@@ -1600,71 +2190,20 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
           )}
 
           <div className="space-y-5">
-            {confirmBoxes.map((box, i) => {
-              const vp = Math.round(boxTotalPrice(box.items) * 0.3 * 100) / 100
-              const selected = selectedSubmitIds.has(box.id)
-
-              return (
-                <button
-                  key={box.id}
-                  type="button"
-                  onClick={() => toggleSubmitSelection(box.id)}
-                  className={`w-full rounded-2xl p-4 text-left transition-all active:scale-[0.98] ${
-                    selected
-                      ? 'ring-2 ring-cheapr-dark shadow-md'
-                      : 'ring-1 ring-cheapr-dark/15 opacity-70 hover:opacity-90'
-                  }`}
-                  style={selected ? DARK_BOX : { backgroundColor: 'rgba(34,34,34,0.08)', color: '#222222' }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] font-bold uppercase tracking-wider ${selected ? 'opacity-40' : 'opacity-30'}`}>
-                        {i + 1}. Lefty
-                      </p>
-                      <p className="mt-0.5 text-base font-black">
-                        {box.items.length === 0 ? 'Lefty' : `Lefty ${box.angebotType}`}
-                      </p>
-                    </div>
-                    <div
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
-                        selected
-                          ? 'border-[#F5A200] bg-[#F5A200]'
-                          : 'border-cheapr-dark/25 bg-transparent'
-                      }`}
-                    >
-                      {selected && (
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                          <path d="M2 6.5L4.5 9L10 3" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 space-y-1">
-                    {box.items.slice(0, 3).map(item => (
-                      <p key={item.id} className={`truncate text-xs font-medium ${selected ? 'opacity-55' : 'opacity-45'}`}>
-                        {item.count > 1 ? `${item.count}× ` : ''}{item.name}
-                      </p>
-                    ))}
-                    {box.items.length > 3 && (
-                      <p className={`text-[10px] font-medium ${selected ? 'opacity-35' : 'opacity-30'}`}>
-                        +{box.items.length - 3} weitere
-                      </p>
-                    )}
-                  </div>
-
-                  <div className={`mt-3 flex items-center justify-between border-t pt-3 ${selected ? 'border-[#F5A200]/20' : 'border-cheapr-dark/10'}`}>
-                    <span className={`text-xs font-bold ${selected ? 'opacity-50' : 'opacity-40'}`}>
-                      bis {box.abholzeit} Uhr
-                    </span>
-                    <span className="text-base font-black">{formatPrice(vp)}</span>
-                  </div>
-                </button>
-              )
-            })}
+            {confirmBoxes.map((box, i) => (
+              <LeftyConfirmCard
+                key={box.id}
+                box={box}
+                index={i + 1}
+                selected={selectedSubmitIds.has(box.id)}
+                selectable={!isSingleConfirm}
+                onToggle={isSingleConfirm ? undefined : () => toggleSubmitSelection(box.id)}
+                onEdit={isSingleConfirm ? () => editFromConfirm(box.id) : undefined}
+              />
+            ))}
           </div>
 
-          {selectedSubmitIds.size > 0 && (
+          {!isSingleConfirm && selectedSubmitIds.size > 0 && (
             <p className="mt-4 text-center text-xs font-bold text-cheapr-dark/40">
               {selectedSubmitIds.size} von {confirmBoxes.length} ausgewählt
             </p>
@@ -1694,6 +2233,7 @@ export default function BetriebForm({ betrieb }: BetriebFormProps) {
         totalSteps={3}
         title="Bis wann abholbar?"
         onBack={() => (isMultiSession() ? goToSessionOverview() : updateBox(activeId, { step: 'overview' }))}
+        onStepClick={navigateToWizardStep}
         onNext={() => {
           if (!active.abholzeit) { updateBox(activeId, { error: 'Bitte eine Abholzeit angeben.' }); return }
           updateBox(activeId, { error: null })
